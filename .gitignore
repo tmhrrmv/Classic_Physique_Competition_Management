@@ -1,0 +1,31 @@
+# ============================================================
+# .gitignore — gestion_competiciones
+# ============================================================
+
+# Credenciales y entorno
+.env
+.env.*
+!.env.example
+backend/config/secrets.php
+
+# Dependencias
+vendor/
+node_modules/
+
+# IDE y editores
+.idea/
+.vscode/
+*.code-workspace
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Logs y caché
+*.log
+*.cache
+/tmp/
+
+# Archivos de sistema
+*.bak
+*.tmp

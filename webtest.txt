@@ -1,0 +1,899 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sports Arena — Gestión de Competiciones</title>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --gold: #D4AF37;
+    --gold-light: #F0D060;
+    --red: #C0392B;
+    --bg: #0A0A0F;
+    --bg2: #111118;
+    --bg3: #18181F;
+    --bg4: #1F1F28;
+    --border: rgba(212,175,55,0.15);
+    --text: #E8E8F0;
+    --muted: #6B6B7E;
+    --card-glow: 0 0 40px rgba(212,175,55,0.05);
+  }
+
+  * { margin:0; padding:0; box-sizing:border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'DM Sans', sans-serif;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* ─── BACKGROUND TEXTURE ─── */
+  body::before {
+    content:'';
+    position:fixed; inset:0; z-index:0;
+    background:
+      radial-gradient(ellipse 60% 40% at 80% 10%, rgba(212,175,55,0.06) 0%, transparent 70%),
+      radial-gradient(ellipse 50% 30% at 10% 80%, rgba(192,57,43,0.05) 0%, transparent 70%);
+    pointer-events:none;
+  }
+
+  /* ─── HEADER ─── */
+  header {
+    position:relative; z-index:10;
+    display:flex; align-items:center; justify-content:space-between;
+    padding:24px 48px;
+    border-bottom:1px solid var(--border);
+    backdrop-filter:blur(20px);
+    background:rgba(10,10,15,0.8);
+  }
+
+  .logo {
+    display:flex; align-items:center; gap:14px;
+  }
+  .logo-icon {
+    width:42px; height:42px;
+    background:linear-gradient(135deg, var(--gold), var(--red));
+    clip-path:polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
+    display:flex; align-items:center; justify-content:center;
+    font-size:18px;
+  }
+  .logo-text {
+    font-family:'Bebas Neue', sans-serif;
+    font-size:28px;
+    letter-spacing:3px;
+    background:linear-gradient(90deg, var(--gold), var(--gold-light));
+    -webkit-background-clip:text; -webkit-text-fill-color:transparent;
+  }
+  .logo-sub {
+    font-size:10px; color:var(--muted); letter-spacing:2px; text-transform:uppercase;
+    margin-top:-4px;
+  }
+
+  nav { display:flex; gap:4px; }
+  nav button {
+    background:none; border:none; cursor:pointer;
+    font-family:'DM Sans', sans-serif; font-size:13px; font-weight:500;
+    color:var(--muted); padding:8px 20px; border-radius:6px;
+    transition:all .2s; letter-spacing:.5px; text-transform:uppercase;
+  }
+  nav button:hover { color:var(--text); background:var(--bg4); }
+  nav button.active {
+    color:var(--gold);
+    background:rgba(212,175,55,0.1);
+    border:1px solid rgba(212,175,55,0.2);
+  }
+
+  /* ─── MAIN ─── */
+  main { position:relative; z-index:1; padding:40px 48px; max-width:1400px; margin:0 auto; }
+
+  .page { display:none; animation:fadeUp .4s ease; }
+  .page.active { display:block; }
+
+  @keyframes fadeUp {
+    from { opacity:0; transform:translateY(16px); }
+    to   { opacity:1; transform:translateY(0); }
+  }
+
+  /* ─── PAGE TITLE ─── */
+  .page-header { margin-bottom:36px; }
+  .page-header h1 {
+    font-family:'Bebas Neue', sans-serif;
+    font-size:56px; letter-spacing:4px;
+    background:linear-gradient(135deg, #fff 30%, var(--gold));
+    -webkit-background-clip:text; -webkit-text-fill-color:transparent;
+    line-height:1;
+  }
+  .page-header p { color:var(--muted); margin-top:8px; font-size:14px; letter-spacing:.5px; }
+
+  /* ─── STAT CARDS ─── */
+  .stats-row {
+    display:grid; grid-template-columns:repeat(4,1fr); gap:16px; margin-bottom:40px;
+  }
+  .stat-card {
+    background:var(--bg3); border:1px solid var(--border);
+    border-radius:12px; padding:24px 28px;
+    position:relative; overflow:hidden;
+    box-shadow:var(--card-glow);
+    transition:transform .2s, box-shadow .2s;
+  }
+  .stat-card:hover { transform:translateY(-3px); box-shadow:0 0 60px rgba(212,175,55,0.1); }
+  .stat-card::after {
+    content:''; position:absolute; top:0; left:0; right:0; height:2px;
+    background:linear-gradient(90deg, var(--gold), transparent);
+  }
+  .stat-num {
+    font-family:'Bebas Neue', sans-serif; font-size:48px; color:var(--gold);
+    line-height:1;
+  }
+  .stat-label { font-size:12px; color:var(--muted); text-transform:uppercase; letter-spacing:1.5px; margin-top:4px; }
+  .stat-icon { position:absolute; right:24px; top:50%; transform:translateY(-50%); font-size:40px; opacity:.08; }
+
+  /* ─── GRID CARDS ─── */
+  .cards-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(320px,1fr)); gap:20px; }
+
+  .card {
+    background:var(--bg3); border:1px solid var(--border);
+    border-radius:14px; padding:28px;
+    box-shadow:var(--card-glow);
+    transition:all .25s; cursor:pointer; position:relative; overflow:hidden;
+  }
+  .card:hover {
+    border-color:rgba(212,175,55,0.4);
+    box-shadow:0 0 50px rgba(212,175,55,0.1);
+    transform:translateY(-4px);
+  }
+  .card-tag {
+    display:inline-block; font-size:10px; font-weight:600; letter-spacing:2px;
+    text-transform:uppercase; padding:4px 10px; border-radius:4px; margin-bottom:14px;
+  }
+  .tag-cadete   { background:rgba(52,152,219,.15); color:#3498db; border:1px solid rgba(52,152,219,.3); }
+  .tag-juvenil  { background:rgba(46,204,113,.15); color:#2ecc71; border:1px solid rgba(46,204,113,.3); }
+  .tag-senior   { background:rgba(212,175,55,.15); color:var(--gold); border:1px solid rgba(212,175,55,.3); }
+  .tag-esp      { background:rgba(192,57,43,.12); color:#e74c3c; border:1px solid rgba(192,57,43,.3); }
+  .tag-mex      { background:rgba(39,174,96,.12); color:#27ae60; border:1px solid rgba(39,174,96,.3); }
+  .tag-arg      { background:rgba(41,128,185,.12); color:#2980b9; border:1px solid rgba(41,128,185,.3); }
+  .tag-chl      { background:rgba(142,68,173,.12); color:#9b59b6; border:1px solid rgba(142,68,173,.3); }
+
+  .card h3 {
+    font-family:'Bebas Neue', sans-serif; font-size:26px; letter-spacing:2px;
+    margin-bottom:6px; color:#fff;
+  }
+  .card-meta { font-size:12px; color:var(--muted); display:flex; gap:16px; flex-wrap:wrap; }
+  .card-meta span { display:flex; align-items:center; gap:5px; }
+
+  .card-stats {
+    display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:18px;
+    padding-top:18px; border-top:1px solid var(--border);
+  }
+  .cs-item { }
+  .cs-val { font-family:'DM Mono', monospace; font-size:18px; color:var(--text); font-weight:500; }
+  .cs-key { font-size:10px; color:var(--muted); text-transform:uppercase; letter-spacing:1px; margin-top:2px; }
+
+  /* ─── ATLETA DETAIL ─── */
+  #atleta-detail {
+    display:none; position:fixed; inset:0; z-index:100;
+    background:rgba(0,0,0,.8); backdrop-filter:blur(12px);
+    align-items:center; justify-content:center; padding:24px;
+  }
+  #atleta-detail.open { display:flex; }
+
+  .detail-panel {
+    background:var(--bg2); border:1px solid var(--border);
+    border-radius:20px; width:100%; max-width:720px;
+    max-height:85vh; overflow-y:auto; padding:40px;
+    box-shadow:0 0 120px rgba(212,175,55,0.15);
+    animation:fadeUp .3s ease;
+  }
+
+  .detail-header {
+    display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:28px;
+  }
+  .detail-name {
+    font-family:'Bebas Neue', sans-serif; font-size:48px; letter-spacing:3px;
+    background:linear-gradient(135deg, #fff, var(--gold));
+    -webkit-background-clip:text; -webkit-text-fill-color:transparent;
+  }
+  .close-btn {
+    background:var(--bg4); border:1px solid var(--border);
+    color:var(--muted); width:36px; height:36px; border-radius:50%;
+    cursor:pointer; font-size:18px; display:flex; align-items:center; justify-content:center;
+    transition:all .2s;
+  }
+  .close-btn:hover { color:#fff; border-color:var(--gold); }
+
+  /* ─── TIMELINE ─── */
+  .timeline { position:relative; margin-top:28px; }
+  .timeline::before {
+    content:''; position:absolute; left:18px; top:0; bottom:0; width:1px;
+    background:linear-gradient(to bottom, var(--gold), transparent);
+  }
+  .tl-item { display:flex; gap:20px; margin-bottom:28px; position:relative; }
+  .tl-dot {
+    width:36px; height:36px; border-radius:50%;
+    background:var(--bg4); border:2px solid var(--gold);
+    display:flex; align-items:center; justify-content:center;
+    flex-shrink:0; font-size:14px; position:relative; z-index:1;
+  }
+  .tl-content {
+    background:var(--bg4); border:1px solid var(--border);
+    border-radius:12px; padding:18px 22px; flex:1;
+  }
+  .tl-event { font-weight:600; font-size:15px; margin-bottom:4px; }
+  .tl-date { font-size:11px; color:var(--gold); letter-spacing:1px; text-transform:uppercase; margin-bottom:10px; }
+  .tl-row { display:flex; gap:20px; flex-wrap:wrap; }
+  .tl-chip {
+    font-family:'DM Mono', monospace; font-size:11px;
+    background:var(--bg3); padding:4px 10px; border-radius:6px;
+    color:var(--muted); border:1px solid var(--border);
+  }
+  .tl-chip span { color:var(--text); font-weight:500; }
+
+  /* ─── COMPETICION CARDS ─── */
+  .comp-card {
+    background:var(--bg3); border:1px solid var(--border);
+    border-radius:14px; margin-bottom:20px; overflow:hidden;
+  }
+  .comp-head {
+    display:flex; align-items:center; justify-content:space-between;
+    padding:22px 28px; cursor:pointer;
+    transition:background .2s;
+  }
+  .comp-head:hover { background:var(--bg4); }
+  .comp-head h3 { font-family:'Bebas Neue', sans-serif; font-size:22px; letter-spacing:2px; }
+  .comp-meta { font-size:12px; color:var(--muted); display:flex; gap:16px; margin-top:4px; }
+  .comp-badge {
+    background:rgba(212,175,55,0.1); border:1px solid rgba(212,175,55,0.3);
+    color:var(--gold); font-size:11px; padding:4px 12px; border-radius:20px;
+    font-family:'DM Mono', monospace;
+  }
+  .comp-arrow { color:var(--muted); transition:transform .3s; font-size:18px; }
+  .comp-card.open .comp-arrow { transform:rotate(180deg); }
+
+  .comp-body {
+    display:none; padding:0 28px 24px;
+  }
+  .comp-card.open .comp-body { display:block; }
+
+  .participants-table { width:100%; border-collapse:collapse; }
+  .participants-table th {
+    font-size:10px; text-transform:uppercase; letter-spacing:1.5px; color:var(--muted);
+    padding:8px 12px; text-align:left; border-bottom:1px solid var(--border);
+  }
+  .participants-table td { padding:12px; font-size:13px; border-bottom:1px solid rgba(255,255,255,.04); }
+  .participants-table tr:last-child td { border-bottom:none; }
+  .participants-table tr:hover td { background:rgba(212,175,55,0.03); }
+  .dorsal {
+    font-family:'DM Mono', monospace; color:var(--gold); font-size:13px; font-weight:500;
+  }
+
+  /* ─── RANKING ─── */
+  .ranking-table { width:100%; border-collapse:collapse; }
+  .ranking-table th {
+    font-size:10px; text-transform:uppercase; letter-spacing:1.5px; color:var(--muted);
+    padding:12px 16px; text-align:left; border-bottom:1px solid var(--border);
+  }
+  .ranking-table td { padding:14px 16px; font-size:14px; border-bottom:1px solid rgba(255,255,255,.04); }
+  .ranking-table tr:hover td { background:rgba(212,175,55,.03); }
+  .rank-pos { font-family:'Bebas Neue', sans-serif; font-size:28px; color:var(--muted); width:50px; }
+  .rank-pos.p1 { color:var(--gold); }
+  .rank-pos.p2 { color:#C0C0C0; }
+  .rank-pos.p3 { color:#CD7F32; }
+
+  .medal { font-size:22px; }
+
+  /* ─── SEARCH ─── */
+  .search-bar {
+    display:flex; align-items:center; gap:12px;
+    background:var(--bg3); border:1px solid var(--border);
+    border-radius:10px; padding:12px 20px; margin-bottom:28px;
+  }
+  .search-bar input {
+    background:none; border:none; outline:none;
+    color:var(--text); font-family:'DM Sans', sans-serif; font-size:15px;
+    flex:1; placeholder:var(--muted);
+  }
+  .search-bar input::placeholder { color:var(--muted); }
+  .search-icon { color:var(--muted); font-size:16px; }
+
+  .filter-row { display:flex; gap:8px; margin-bottom:28px; flex-wrap:wrap; }
+  .filter-btn {
+    background:var(--bg3); border:1px solid var(--border);
+    color:var(--muted); padding:7px 16px; border-radius:8px;
+    cursor:pointer; font-size:12px; font-family:'DM Sans', sans-serif;
+    transition:all .2s; letter-spacing:.5px; text-transform:uppercase;
+  }
+  .filter-btn:hover { color:var(--text); }
+  .filter-btn.active {
+    background:rgba(212,175,55,0.1); border-color:rgba(212,175,55,.4); color:var(--gold);
+  }
+
+  /* ─── SCROLLBAR ─── */
+  ::-webkit-scrollbar { width:6px; }
+  ::-webkit-scrollbar-track { background:var(--bg); }
+  ::-webkit-scrollbar-thumb { background:var(--bg4); border-radius:3px; }
+  ::-webkit-scrollbar-thumb:hover { background:var(--border); }
+
+  /* ─── RESPONSIVE ─── */
+  @media(max-width:768px) {
+    header { padding:16px 20px; }
+    main { padding:24px 20px; }
+    .stats-row { grid-template-columns:1fr 1fr; }
+    nav button { padding:6px 12px; font-size:11px; }
+    .page-header h1 { font-size:38px; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ATLETA DETAIL MODAL -->
+<div id="atleta-detail">
+  <div class="detail-panel">
+    <div class="detail-header">
+      <div>
+        <div class="detail-name" id="d-name"></div>
+        <div id="d-tags" style="margin-top:8px; display:flex; gap:8px;"></div>
+      </div>
+      <button class="close-btn" onclick="closeDetail()">✕</button>
+    </div>
+    <div id="d-info" style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:16px; margin-bottom:28px; padding:20px; background:var(--bg4); border-radius:12px;"></div>
+    <div style="font-family:'Bebas Neue',sans-serif; font-size:18px; letter-spacing:2px; color:var(--gold); margin-bottom:8px;">HISTORIAL DE COMPETICIONES</div>
+    <div class="timeline" id="d-timeline"></div>
+  </div>
+</div>
+
+<!-- HEADER -->
+<header>
+  <div class="logo">
+    <div class="logo-icon">🏆</div>
+    <div>
+      <div class="logo-text">Sports Arena</div>
+      <div class="logo-sub">Gestión de Competiciones</div>
+    </div>
+  </div>
+  <nav>
+    <button class="active" onclick="showPage('home', this)">Dashboard</button>
+    <button onclick="showPage('atletas', this)">Atletas</button>
+    <button onclick="showPage('competiciones', this)">Competiciones</button>
+    <button onclick="showPage('ranking', this)">Ranking</button>
+  </nav>
+</header>
+
+<main>
+
+  <!-- ─── HOME ─── -->
+  <div class="page active" id="page-home">
+    <div class="page-header">
+      <h1>Dashboard</h1>
+      <p>Vista general del sistema de competiciones</p>
+    </div>
+
+    <div class="stats-row">
+      <div class="stat-card">
+        <div class="stat-num">4</div>
+        <div class="stat-label">Atletas Registrados</div>
+        <div class="stat-icon">🏃</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-num">4</div>
+        <div class="stat-label">Competiciones</div>
+        <div class="stat-icon">🏟️</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-num">11</div>
+        <div class="stat-label">Inscripciones Totales</div>
+        <div class="stat-icon">📋</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-num">3</div>
+        <div class="stat-label">Categorías</div>
+        <div class="stat-icon">🎖️</div>
+      </div>
+    </div>
+
+    <!-- Últimas competiciones -->
+    <div style="display:grid; grid-template-columns:1.2fr 1fr; gap:24px;">
+
+      <div>
+        <div style="font-family:'Bebas Neue',sans-serif; font-size:20px; letter-spacing:2px; margin-bottom:16px; color:var(--gold);">ÚLTIMAS COMPETICIONES</div>
+        <div class="comp-card open">
+          <div class="comp-head" onclick="toggleComp(this)">
+            <div>
+              <h3>Copa Ciudad de Madrid 2025</h3>
+              <div class="comp-meta"><span>📅 20 Sep 2025</span><span>📍 Centro Deportivo Municipal</span></div>
+            </div>
+            <div style="display:flex;align-items:center;gap:10px;">
+              <div class="comp-badge">2 atletas</div>
+              <div class="comp-arrow">▾</div>
+            </div>
+          </div>
+          <div class="comp-body">
+            <table class="participants-table">
+              <thead><tr><th>#</th><th>Atleta</th><th>Categoría</th><th>Peso</th><th>Altura</th></tr></thead>
+              <tbody>
+                <tr><td class="dorsal">201</td><td onclick="openDetail('Carlos Gomez')" style="cursor:pointer;color:var(--gold-light);">Carlos Gomez</td><td><span class="card-tag tag-juvenil">Juvenil</span></td><td>63.5 kg</td><td>1.62 m</td></tr>
+                <tr><td class="dorsal">202</td><td onclick="openDetail('Sofia Lopez')" style="cursor:pointer;color:var(--gold-light);">Sofia Lopez</td><td><span class="card-tag tag-juvenil">Juvenil</span></td><td>58.5 kg</td><td>1.65 m</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="comp-card">
+          <div class="comp-head" onclick="toggleComp(this)">
+            <div>
+              <h3>Torneo Apertura 2025</h3>
+              <div class="comp-meta"><span>📅 09 Mar 2025</span><span>📍 Estadio Nacional</span></div>
+            </div>
+            <div style="display:flex;align-items:center;gap:10px;">
+              <div class="comp-badge">4 atletas</div>
+              <div class="comp-arrow">▾</div>
+            </div>
+          </div>
+          <div class="comp-body">
+            <table class="participants-table">
+              <thead><tr><th>#</th><th>Atleta</th><th>Categoría</th><th>Peso</th><th>Altura</th></tr></thead>
+              <tbody>
+                <tr><td class="dorsal">101</td><td onclick="openDetail('Carlos Gomez')" style="cursor:pointer;color:var(--gold-light);">Carlos Gomez</td><td><span class="card-tag tag-juvenil">Juvenil</span></td><td>63.0 kg</td><td>1.62 m</td></tr>
+                <tr><td class="dorsal">102</td><td onclick="openDetail('Maria Rodriguez')" style="cursor:pointer;color:var(--gold-light);">Maria Rodriguez</td><td><span class="card-tag tag-juvenil">Juvenil</span></td><td>60.5 kg</td><td>1.68 m</td></tr>
+                <tr><td class="dorsal">103</td><td onclick="openDetail('Lucas Fernandez')" style="cursor:pointer;color:var(--gold-light);">Lucas Fernandez</td><td><span class="card-tag tag-senior">Senior</span></td><td>87.0 kg</td><td>1.80 m</td></tr>
+                <tr><td class="dorsal">104</td><td onclick="openDetail('Sofia Lopez')" style="cursor:pointer;color:var(--gold-light);">Sofia Lopez</td><td><span class="card-tag tag-juvenil">Juvenil</span></td><td>58.0 kg</td><td>1.65 m</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- Categorías -->
+      <div>
+        <div style="font-family:'Bebas Neue',sans-serif; font-size:20px; letter-spacing:2px; margin-bottom:16px; color:var(--gold);">CATEGORÍAS</div>
+        <div style="display:flex; flex-direction:column; gap:12px;">
+          <div class="card" style="cursor:default;">
+            <span class="card-tag tag-cadete">Cadete</span>
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+              <div>
+                <div class="cs-val" style="font-size:14px;">Altura: 1.40 – 1.59 m</div>
+                <div class="cs-key">Peso máx: 60 kg</div>
+              </div>
+              <div style="font-family:'Bebas Neue',sans-serif; font-size:40px; color:rgba(52,152,219,.2);">C</div>
+            </div>
+          </div>
+          <div class="card" style="cursor:default;">
+            <span class="card-tag tag-juvenil">Juvenil</span>
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+              <div>
+                <div class="cs-val" style="font-size:14px;">Altura: 1.60 – 1.75 m</div>
+                <div class="cs-key">Peso máx: 75 kg</div>
+              </div>
+              <div style="font-family:'Bebas Neue',sans-serif; font-size:40px; color:rgba(46,204,113,.2);">J</div>
+            </div>
+          </div>
+          <div class="card" style="cursor:default;">
+            <span class="card-tag tag-senior">Senior</span>
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+              <div>
+                <div class="cs-val" style="font-size:14px;">Altura: 1.76 – 2.20 m</div>
+                <div class="cs-key">Peso máx: 120 kg</div>
+              </div>
+              <div style="font-family:'Bebas Neue',sans-serif; font-size:40px; color:rgba(212,175,55,.2);">S</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ─── ATLETAS ─── -->
+  <div class="page" id="page-atletas">
+    <div class="page-header">
+      <h1>Atletas</h1>
+      <p>Haz clic en un atleta para ver su historial completo</p>
+    </div>
+    <div class="search-bar">
+      <span class="search-icon">🔍</span>
+      <input type="text" placeholder="Buscar atleta por nombre..." id="search-atleta" oninput="filterAtletas()">
+    </div>
+    <div class="filter-row">
+      <button class="filter-btn active" onclick="setFilter('all', this)">Todos</button>
+      <button class="filter-btn" onclick="setFilter('Cadete', this)">Cadete</button>
+      <button class="filter-btn" onclick="setFilter('Juvenil', this)">Juvenil</button>
+      <button class="filter-btn" onclick="setFilter('Senior', this)">Senior</button>
+      <button class="filter-btn" onclick="setFilter('ESP', this)">🇪🇸 España</button>
+      <button class="filter-btn" onclick="setFilter('MEX', this)">🇲🇽 México</button>
+      <button class="filter-btn" onclick="setFilter('ARG', this)">🇦🇷 Argentina</button>
+      <button class="filter-btn" onclick="setFilter('CHL', this)">🇨🇱 Chile</button>
+    </div>
+    <div class="cards-grid" id="atletas-grid">
+      <!-- cards injected by JS -->
+    </div>
+  </div>
+
+  <!-- ─── COMPETICIONES ─── -->
+  <div class="page" id="page-competiciones">
+    <div class="page-header">
+      <h1>Competiciones</h1>
+      <p>Todos los eventos registrados en el sistema</p>
+    </div>
+
+    <div class="comp-card">
+      <div class="comp-head" onclick="toggleComp(this)">
+        <div>
+          <h3>Copa Ciudad de Madrid 2025</h3>
+          <div class="comp-meta"><span>📅 20 Sep 2025</span><span>📍 Centro Deportivo Municipal</span></div>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;"><div class="comp-badge">2 participantes</div><div class="comp-arrow">▾</div></div>
+      </div>
+      <div class="comp-body">
+        <table class="participants-table">
+          <thead><tr><th>Dorsal</th><th>Atleta</th><th>Nac.</th><th>Categoría</th><th>Peso</th><th>Altura</th></tr></thead>
+          <tbody>
+            <tr><td class="dorsal">#201</td><td onclick="openDetail('Carlos Gomez')" style="cursor:pointer;color:var(--gold-light);">Carlos Gomez</td><td><span class="card-tag tag-esp">ESP 🇪🇸</span></td><td><span class="card-tag tag-juvenil">Juvenil</span></td><td>63.5 kg</td><td>1.62 m</td></tr>
+            <tr><td class="dorsal">#202</td><td onclick="openDetail('Sofia Lopez')" style="cursor:pointer;color:var(--gold-light);">Sofia Lopez</td><td><span class="card-tag tag-chl">CHL 🇨🇱</span></td><td><span class="card-tag tag-juvenil">Juvenil</span></td><td>58.5 kg</td><td>1.65 m</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="comp-card">
+      <div class="comp-head" onclick="toggleComp(this)">
+        <div>
+          <h3>Torneo Apertura 2025</h3>
+          <div class="comp-meta"><span>📅 09 Mar 2025</span><span>📍 Estadio Nacional</span></div>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;"><div class="comp-badge">4 participantes</div><div class="comp-arrow">▾</div></div>
+      </div>
+      <div class="comp-body">
+        <table class="participants-table">
+          <thead><tr><th>Dorsal</th><th>Atleta</th><th>Nac.</th><th>Categoría</th><th>Peso</th><th>Altura</th></tr></thead>
+          <tbody>
+            <tr><td class="dorsal">#101</td><td onclick="openDetail('Carlos Gomez')" style="cursor:pointer;color:var(--gold-light);">Carlos Gomez</td><td><span class="card-tag tag-esp">ESP 🇪🇸</span></td><td><span class="card-tag tag-juvenil">Juvenil</span></td><td>63.0 kg</td><td>1.62 m</td></tr>
+            <tr><td class="dorsal">#102</td><td onclick="openDetail('Maria Rodriguez')" style="cursor:pointer;color:var(--gold-light);">Maria Rodriguez</td><td><span class="card-tag tag-mex">MEX 🇲🇽</span></td><td><span class="card-tag tag-juvenil">Juvenil</span></td><td>60.5 kg</td><td>1.68 m</td></tr>
+            <tr><td class="dorsal">#103</td><td onclick="openDetail('Lucas Fernandez')" style="cursor:pointer;color:var(--gold-light);">Lucas Fernandez</td><td><span class="card-tag tag-arg">ARG 🇦🇷</span></td><td><span class="card-tag tag-senior">Senior</span></td><td>87.0 kg</td><td>1.80 m</td></tr>
+            <tr><td class="dorsal">#104</td><td onclick="openDetail('Sofia Lopez')" style="cursor:pointer;color:var(--gold-light);">Sofia Lopez</td><td><span class="card-tag tag-chl">CHL 🇨🇱</span></td><td><span class="card-tag tag-juvenil">Juvenil</span></td><td>58.0 kg</td><td>1.65 m</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="comp-card">
+      <div class="comp-head" onclick="toggleComp(this)">
+        <div>
+          <h3>Copa Ciudad de Madrid 2024</h3>
+          <div class="comp-meta"><span>📅 21 Sep 2024</span><span>📍 Centro Deportivo Municipal</span></div>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;"><div class="comp-badge">2 participantes</div><div class="comp-arrow">▾</div></div>
+      </div>
+      <div class="comp-body">
+        <table class="participants-table">
+          <thead><tr><th>Dorsal</th><th>Atleta</th><th>Nac.</th><th>Categoría</th><th>Peso</th><th>Altura</th></tr></thead>
+          <tbody>
+            <tr><td class="dorsal">#201</td><td onclick="openDetail('Carlos Gomez')" style="cursor:pointer;color:var(--gold-light);">Carlos Gomez</td><td><span class="card-tag tag-esp">ESP 🇪🇸</span></td><td><span class="card-tag tag-cadete">Cadete</span></td><td>56.0 kg</td><td>1.55 m</td></tr>
+            <tr><td class="dorsal">#202</td><td onclick="openDetail('Lucas Fernandez')" style="cursor:pointer;color:var(--gold-light);">Lucas Fernandez</td><td><span class="card-tag tag-arg">ARG 🇦🇷</span></td><td><span class="card-tag tag-senior">Senior</span></td><td>86.5 kg</td><td>1.80 m</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="comp-card">
+      <div class="comp-head" onclick="toggleComp(this)">
+        <div>
+          <h3>Torneo Apertura 2024</h3>
+          <div class="comp-meta"><span>📅 10 Mar 2024</span><span>📍 Estadio Nacional</span></div>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;"><div class="comp-badge">3 participantes</div><div class="comp-arrow">▾</div></div>
+      </div>
+      <div class="comp-body">
+        <table class="participants-table">
+          <thead><tr><th>Dorsal</th><th>Atleta</th><th>Nac.</th><th>Categoría</th><th>Peso</th><th>Altura</th></tr></thead>
+          <tbody>
+            <tr><td class="dorsal">#101</td><td onclick="openDetail('Carlos Gomez')" style="cursor:pointer;color:var(--gold-light);">Carlos Gomez</td><td><span class="card-tag tag-esp">ESP 🇪🇸</span></td><td><span class="card-tag tag-cadete">Cadete</span></td><td>55.5 kg</td><td>1.55 m</td></tr>
+            <tr><td class="dorsal">#102</td><td onclick="openDetail('Maria Rodriguez')" style="cursor:pointer;color:var(--gold-light);">Maria Rodriguez</td><td><span class="card-tag tag-mex">MEX 🇲🇽</span></td><td><span class="card-tag tag-juvenil">Juvenil</span></td><td>62.0 kg</td><td>1.68 m</td></tr>
+            <tr><td class="dorsal">#103</td><td onclick="openDetail('Lucas Fernandez')" style="cursor:pointer;color:var(--gold-light);">Lucas Fernandez</td><td><span class="card-tag tag-arg">ARG 🇦🇷</span></td><td><span class="card-tag tag-senior">Senior</span></td><td>85.0 kg</td><td>1.80 m</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ─── RANKING ─── -->
+  <div class="page" id="page-ranking">
+    <div class="page-header">
+      <h1>Ranking</h1>
+      <p>Atletas ordenados por participaciones y progresión</p>
+    </div>
+
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:24px;">
+      <div>
+        <div style="font-family:'Bebas Neue',sans-serif; font-size:18px; letter-spacing:2px; color:var(--gold); margin-bottom:14px;">POR PARTICIPACIONES</div>
+        <div style="background:var(--bg3); border:1px solid var(--border); border-radius:14px; overflow:hidden;">
+          <table class="ranking-table">
+            <thead><tr><th>Pos</th><th>Atleta</th><th>Nac.</th><th>Eventos</th></tr></thead>
+            <tbody>
+              <tr>
+                <td class="rank-pos p1">1</td>
+                <td>
+                  <div onclick="openDetail('Carlos Gomez')" style="cursor:pointer;">
+                    <div style="font-weight:600; color:var(--gold-light);">Carlos Gomez</div>
+                    <div style="font-size:11px; color:var(--muted);">Cadete → Juvenil</div>
+                  </div>
+                </td>
+                <td><span class="card-tag tag-esp">ESP 🇪🇸</span></td>
+                <td><span style="font-family:'DM Mono',monospace; color:var(--gold); font-size:18px;">4</span></td>
+              </tr>
+              <tr>
+                <td class="rank-pos p2">2</td>
+                <td>
+                  <div onclick="openDetail('Lucas Fernandez')" style="cursor:pointer;">
+                    <div style="font-weight:600; color:#C0C0C0;">Lucas Fernandez</div>
+                    <div style="font-size:11px; color:var(--muted);">Senior</div>
+                  </div>
+                </td>
+                <td><span class="card-tag tag-arg">ARG 🇦🇷</span></td>
+                <td><span style="font-family:'DM Mono',monospace; color:#C0C0C0; font-size:18px;">3</span></td>
+              </tr>
+              <tr>
+                <td class="rank-pos p3">3</td>
+                <td>
+                  <div onclick="openDetail('Maria Rodriguez')" style="cursor:pointer;">
+                    <div style="font-weight:600; color:#CD7F32;">Maria Rodriguez</div>
+                    <div style="font-size:11px; color:var(--muted);">Juvenil</div>
+                  </div>
+                </td>
+                <td><span class="card-tag tag-mex">MEX 🇲🇽</span></td>
+                <td><span style="font-family:'DM Mono',monospace; color:#CD7F32; font-size:18px;">2</span></td>
+              </tr>
+              <tr>
+                <td class="rank-pos">4</td>
+                <td>
+                  <div onclick="openDetail('Sofia Lopez')" style="cursor:pointer;">
+                    <div style="font-weight:600;">Sofia Lopez</div>
+                    <div style="font-size:11px; color:var(--muted);">Juvenil</div>
+                  </div>
+                </td>
+                <td><span class="card-tag tag-chl">CHL 🇨🇱</span></td>
+                <td><span style="font-family:'DM Mono',monospace; font-size:18px;">2</span></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div>
+        <div style="font-family:'Bebas Neue',sans-serif; font-size:18px; letter-spacing:2px; color:var(--gold); margin-bottom:14px;">PROGRESIÓN DE PESO</div>
+        <div style="display:flex; flex-direction:column; gap:12px;">
+          <div class="card" style="cursor:default;" onclick="openDetail('Carlos Gomez')">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+              <div style="font-weight:600; cursor:pointer; color:var(--gold-light);" onclick="openDetail('Carlos Gomez')">Carlos Gomez</div>
+              <span class="card-tag tag-esp">ESP 🇪🇸</span>
+            </div>
+            <div style="display:flex; align-items:center; gap:10px;">
+              <div style="font-family:'DM Mono',monospace; font-size:13px; color:var(--muted);">55.5 kg</div>
+              <div style="flex:1; height:4px; background:var(--bg4); border-radius:2px; position:relative; overflow:visible;">
+                <div style="position:absolute; left:0; top:0; height:100%; width:60%; background:linear-gradient(90deg,var(--gold),var(--gold-light)); border-radius:2px;"></div>
+              </div>
+              <div style="font-family:'DM Mono',monospace; font-size:13px; color:var(--gold);">63.5 kg</div>
+            </div>
+            <div style="font-size:11px; color:var(--muted); margin-top:6px;">+8 kg en 4 eventos · 2024→2025</div>
+          </div>
+
+          <div class="card" style="cursor:default;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+              <div style="font-weight:600; cursor:pointer; color:var(--gold-light);" onclick="openDetail('Lucas Fernandez')">Lucas Fernandez</div>
+              <span class="card-tag tag-arg">ARG 🇦🇷</span>
+            </div>
+            <div style="display:flex; align-items:center; gap:10px;">
+              <div style="font-family:'DM Mono',monospace; font-size:13px; color:var(--muted);">85.0 kg</div>
+              <div style="flex:1; height:4px; background:var(--bg4); border-radius:2px; position:relative;">
+                <div style="position:absolute; left:0; top:0; height:100%; width:40%; background:linear-gradient(90deg,#3498db,#5dade2); border-radius:2px;"></div>
+              </div>
+              <div style="font-family:'DM Mono',monospace; font-size:13px; color:#5dade2;">87.0 kg</div>
+            </div>
+            <div style="font-size:11px; color:var(--muted); margin-top:6px;">+2 kg en 3 eventos · 2024→2025</div>
+          </div>
+
+          <div class="card" style="cursor:default;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+              <div style="font-weight:600; cursor:pointer; color:var(--gold-light);" onclick="openDetail('Maria Rodriguez')">Maria Rodriguez</div>
+              <span class="card-tag tag-mex">MEX 🇲🇽</span>
+            </div>
+            <div style="display:flex; align-items:center; gap:10px;">
+              <div style="font-family:'DM Mono',monospace; font-size:13px; color:var(--muted);">62.0 kg</div>
+              <div style="flex:1; height:4px; background:var(--bg4); border-radius:2px; position:relative;">
+                <div style="position:absolute; left:0; top:0; height:100%; width:20%; background:linear-gradient(90deg,#27ae60,#2ecc71); border-radius:2px;"></div>
+              </div>
+              <div style="font-family:'DM Mono',monospace; font-size:13px; color:#2ecc71;">60.5 kg</div>
+            </div>
+            <div style="font-size:11px; color:var(--muted); margin-top:6px;">-1.5 kg en 2 eventos · 2024→2025</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</main>
+
+<script>
+// ─── DATA ───────────────────────────────────────────────────
+const ATLETAS = [
+  {
+    id: 'Carlos Gomez',
+    nombre: 'Carlos', apellido: 'Gomez',
+    nacimiento: '2005-04-12', nac: 'ESP', flag: '🇪🇸',
+    nacTag: 'tag-esp',
+    eventos: 4,
+    categoriaActual: 'Juvenil',
+    catTag: 'tag-juvenil',
+    historial: [
+      { evento:'Torneo Apertura 2024', fecha:'10 Mar 2024', cat:'Cadete', dorsal:101, peso:55.5, altura:1.55, lugar:'Estadio Nacional' },
+      { evento:'Copa Ciudad de Madrid 2024', fecha:'21 Sep 2024', cat:'Cadete', dorsal:201, peso:56.0, altura:1.55, lugar:'Centro Deportivo Municipal' },
+      { evento:'Torneo Apertura 2025', fecha:'09 Mar 2025', cat:'Juvenil', dorsal:101, peso:63.0, altura:1.62, lugar:'Estadio Nacional' },
+      { evento:'Copa Ciudad de Madrid 2025', fecha:'20 Sep 2025', cat:'Juvenil', dorsal:201, peso:63.5, altura:1.62, lugar:'Centro Deportivo Municipal' },
+    ]
+  },
+  {
+    id: 'Maria Rodriguez',
+    nombre: 'Maria', apellido: 'Rodriguez',
+    nacimiento: '2004-08-22', nac: 'MEX', flag: '🇲🇽',
+    nacTag: 'tag-mex',
+    eventos: 2,
+    categoriaActual: 'Juvenil',
+    catTag: 'tag-juvenil',
+    historial: [
+      { evento:'Torneo Apertura 2024', fecha:'10 Mar 2024', cat:'Juvenil', dorsal:102, peso:62.0, altura:1.68, lugar:'Estadio Nacional' },
+      { evento:'Torneo Apertura 2025', fecha:'09 Mar 2025', cat:'Juvenil', dorsal:102, peso:60.5, altura:1.68, lugar:'Estadio Nacional' },
+    ]
+  },
+  {
+    id: 'Lucas Fernandez',
+    nombre: 'Lucas', apellido: 'Fernandez',
+    nacimiento: '2002-01-15', nac: 'ARG', flag: '🇦🇷',
+    nacTag: 'tag-arg',
+    eventos: 3,
+    categoriaActual: 'Senior',
+    catTag: 'tag-senior',
+    historial: [
+      { evento:'Torneo Apertura 2024', fecha:'10 Mar 2024', cat:'Senior', dorsal:103, peso:85.0, altura:1.80, lugar:'Estadio Nacional' },
+      { evento:'Copa Ciudad de Madrid 2024', fecha:'21 Sep 2024', cat:'Senior', dorsal:202, peso:86.5, altura:1.80, lugar:'Centro Deportivo Municipal' },
+      { evento:'Torneo Apertura 2025', fecha:'09 Mar 2025', cat:'Senior', dorsal:103, peso:87.0, altura:1.80, lugar:'Estadio Nacional' },
+    ]
+  },
+  {
+    id: 'Sofia Lopez',
+    nombre: 'Sofia', apellido: 'Lopez',
+    nacimiento: '2003-11-30', nac: 'CHL', flag: '🇨🇱',
+    nacTag: 'tag-chl',
+    eventos: 2,
+    categoriaActual: 'Juvenil',
+    catTag: 'tag-juvenil',
+    historial: [
+      { evento:'Torneo Apertura 2025', fecha:'09 Mar 2025', cat:'Juvenil', dorsal:104, peso:58.0, altura:1.65, lugar:'Estadio Nacional' },
+      { evento:'Copa Ciudad de Madrid 2025', fecha:'20 Sep 2025', cat:'Juvenil', dorsal:202, peso:58.5, altura:1.65, lugar:'Centro Deportivo Municipal' },
+    ]
+  },
+];
+
+const catEmoji = { Cadete:'🔵', Juvenil:'🟢', Senior:'🟡' };
+let currentFilter = 'all';
+
+// ─── RENDER ATLETAS ──────────────────────────────────────────
+function renderAtletas(list) {
+  const g = document.getElementById('atletas-grid');
+  g.innerHTML = list.map(a => {
+    const age = new Date().getFullYear() - new Date(a.nacimiento).getFullYear();
+    const lastH = a.historial[a.historial.length - 1];
+    return `
+    <div class="card" onclick="openDetail('${a.id}')">
+      <span class="card-tag ${a.catTag}">${a.categoriaActual}</span>
+      <span class="card-tag ${a.nacTag}" style="margin-left:6px;">${a.nac} ${a.flag}</span>
+      <h3>${a.nombre}<br>${a.apellido}</h3>
+      <div class="card-meta">
+        <span>🎂 ${age} años</span>
+        <span>🏟️ ${a.eventos} evento${a.eventos>1?'s':''}</span>
+      </div>
+      <div class="card-stats">
+        <div class="cs-item">
+          <div class="cs-val">${lastH.peso} kg</div>
+          <div class="cs-key">Último peso</div>
+        </div>
+        <div class="cs-item">
+          <div class="cs-val">${lastH.altura} m</div>
+          <div class="cs-key">Altura</div>
+        </div>
+        <div class="cs-item">
+          <div class="cs-val">#${lastH.dorsal}</div>
+          <div class="cs-key">Último dorsal</div>
+        </div>
+        <div class="cs-item">
+          <div class="cs-val">${catEmoji[a.categoriaActual]} ${a.categoriaActual}</div>
+          <div class="cs-key">Categoría actual</div>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function filterAtletas() {
+  const q = document.getElementById('search-atleta').value.toLowerCase();
+  let list = ATLETAS.filter(a => {
+    const name = (a.nombre + ' ' + a.apellido).toLowerCase();
+    if (q && !name.includes(q)) return false;
+    if (currentFilter === 'all') return true;
+    if (['ESP','MEX','ARG','CHL'].includes(currentFilter)) return a.nac === currentFilter;
+    return a.categoriaActual === currentFilter;
+  });
+  renderAtletas(list);
+}
+
+function setFilter(f, btn) {
+  currentFilter = f;
+  document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  filterAtletas();
+}
+
+// ─── DETAIL MODAL ────────────────────────────────────────────
+function openDetail(id) {
+  const a = ATLETAS.find(x => x.id === id);
+  if (!a) return;
+
+  document.getElementById('d-name').textContent = a.nombre + ' ' + a.apellido;
+  document.getElementById('d-tags').innerHTML =
+    `<span class="card-tag ${a.catTag}">${a.categoriaActual}</span><span class="card-tag ${a.nacTag}">${a.nac} ${a.flag}</span>`;
+
+  const age = new Date().getFullYear() - new Date(a.nacimiento).getFullYear();
+  document.getElementById('d-info').innerHTML = `
+    <div><div class="cs-val">${age}</div><div class="cs-key">Años</div></div>
+    <div><div class="cs-val">${a.eventos}</div><div class="cs-key">Competiciones</div></div>
+    <div><div class="cs-val">${a.nacimiento}</div><div class="cs-key">Nacimiento</div></div>
+  `;
+
+  document.getElementById('d-timeline').innerHTML = a.historial.map((h, i) => {
+    const icons = ['🥇','🥈','🥉','🏅'];
+    return `
+    <div class="tl-item">
+      <div class="tl-dot">${icons[i] || '🏅'}</div>
+      <div class="tl-content">
+        <div class="tl-event">${h.evento}</div>
+        <div class="tl-date">📅 ${h.fecha} — 📍 ${h.lugar}</div>
+        <div class="tl-row">
+          <span class="tl-chip">Dorsal: <span>#${h.dorsal}</span></span>
+          <span class="tl-chip">Categoría: <span>${h.cat}</span></span>
+          <span class="tl-chip">Peso: <span>${h.peso} kg</span></span>
+          <span class="tl-chip">Altura: <span>${h.altura} m</span></span>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+
+  document.getElementById('atleta-detail').classList.add('open');
+  document.body.style.overflow = 'hidden';
+}
+
+function closeDetail() {
+  document.getElementById('atleta-detail').classList.remove('open');
+  document.body.style.overflow = '';
+}
+
+document.getElementById('atleta-detail').addEventListener('click', function(e) {
+  if (e.target === this) closeDetail();
+});
+
+// ─── ACCORDION ───────────────────────────────────────────────
+function toggleComp(head) {
+  head.parentElement.classList.toggle('open');
+}
+
+// ─── PAGES ───────────────────────────────────────────────────
+function showPage(id, btn) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('nav button').forEach(b => b.classList.remove('active'));
+  document.getElementById('page-' + id).classList.add('active');
+  btn.classList.add('active');
+}
+
+// ─── INIT ────────────────────────────────────────────────────
+renderAtletas(ATLETAS);
+</script>
+</body>
+</html>
