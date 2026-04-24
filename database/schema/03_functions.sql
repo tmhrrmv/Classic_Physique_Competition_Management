@@ -7,15 +7,20 @@
 --        fn_get_atleta_id, fn_inscripcion_existe,
 --        fn_juez_existe, fn_competicion_existe,
 --        fn_ya_inscrito, fn_contar_puntuaciones_evento
--- v1.1 - fn_juez_existe: ahora comprueba también activo=1
+-- v1.1 - fn_juez_existe: comprueba también activo=1
 --        Un juez inactivo no puede puntuar
 -- v1.2 - Nueva: fn_estado_competicion
---        Calcula el estado en tiempo real según la fecha
+--        Calcula estado en tiempo real según la fecha
 --        Sustituye el campo estado eliminado de competicion
 --      - Nueva: fn_edad_atleta
---        Calcula la edad del atleta en la fecha del evento
+--        Calcula edad del atleta en la fecha del evento
 --      - Nueva: fn_categoria_valida_para_edad
 --        Comprueba si la edad es válida para la categoría
+-- v1.3 - fn_categoria_valida_para_edad: ya no tiene rangos
+--        hardcodeados, lee edad_min y edad_max directamente
+--        de la tabla categoria (más flexible y mantenible)
+-- v1.4 - fn_estado_competicion: añadido comentario explícito
+--        de que 'sin_fecha' bloquea el cálculo de resultados
 -- ============================================================
 
 USE gestion_competiciones;
@@ -152,16 +157,20 @@ END$$
 
 
 -- ============================================================
--- fn_estado_competicion  (v1.2 - NUEVA)
+-- fn_estado_competicion  (v1.2, revisada v1.4)
 -- Calcula el estado de una competición en tiempo real
 -- comparando su fecha con la fecha actual.
+-- La fecha es la ÚNICA fuente de verdad del estado.
 -- Sustituye el campo estado eliminado de la tabla competicion.
 --
 -- Retorna:
---   'abierta'  → fecha futura (todavía no ha llegado)
---   'en_curso' → fecha es hoy (el evento está pasando)
---   'cerrada'  → fecha pasada (el evento ya terminó)
---   'sin_fecha'→ la competición no tiene fecha asignada
+--   'abierta'   → fecha futura (inscripciones abiertas)
+--   'en_curso'  → fecha es hoy (evento activo)
+--   'cerrada'   → fecha pasada (evento finalizado)
+--   'sin_fecha' → sin fecha asignada
+--
+-- v1.4: 'sin_fecha' bloquea sp_calcular_resultados.
+--       Una competición sin fecha no puede tener resultados.
 -- ============================================================
 CREATE FUNCTION fn_estado_competicion(
   p_id_competicion INT
@@ -170,28 +179,22 @@ READS SQL DATA
 DETERMINISTIC
 BEGIN
   DECLARE v_fecha DATE;
-
   SELECT fecha INTO v_fecha
-    FROM competicion
-   WHERE id_competicion = p_id_competicion;
+    FROM competicion WHERE id_competicion = p_id_competicion;
 
-  IF v_fecha IS NULL THEN
-    RETURN 'sin_fecha';
-  ELSEIF v_fecha > CURDATE() THEN
-    RETURN 'abierta';
-  ELSEIF v_fecha = CURDATE() THEN
-    RETURN 'en_curso';
-  ELSE
-    RETURN 'cerrada';
+  IF v_fecha IS NULL   THEN RETURN 'sin_fecha';
+  ELSEIF v_fecha > CURDATE() THEN RETURN 'abierta';
+  ELSEIF v_fecha = CURDATE() THEN RETURN 'en_curso';
+  ELSE RETURN 'cerrada';
   END IF;
 END$$
 
 
 -- ============================================================
--- fn_edad_atleta  (v1.2 - NUEVA)
+-- fn_edad_atleta  (v1.2)
 -- Calcula la edad del atleta en la fecha del evento.
 -- Usar la fecha del evento (no la actual) garantiza que
--- la categoría asignada es correcta para ese momento concreto.
+-- la categoría es correcta para ese momento concreto.
 -- ============================================================
 CREATE FUNCTION fn_edad_atleta(
   p_fecha_nacimiento DATE,
@@ -204,16 +207,17 @@ END$$
 
 
 -- ============================================================
--- fn_categoria_valida_para_edad  (v1.2 - NUEVA)
+-- fn_categoria_valida_para_edad  (v1.2, mejorada v1.3)
 -- Comprueba si la edad del atleta es válida para la categoría.
 -- Evita que un atleta se inscriba en una categoría incorrecta.
 --
--- Rangos de edad por categoría (Classic Physique):
---   Cadete:  14 - 17 años
---   Juvenil: 18 - 23 años
---   Senior:  24+ años
+-- v1.3: ya no tiene rangos hardcodeados en el código.
+--       Lee edad_min y edad_max directamente de la tabla
+--       categoria, por lo que si el reglamento cambia basta
+--       con actualizar los datos sin tocar el código.
 --
 -- Devuelve 1 si la edad es válida, 0 si no lo es.
+-- Si la categoría no tiene rangos de edad definidos → 1 (OK)
 -- ============================================================
 CREATE FUNCTION fn_categoria_valida_para_edad(
   p_id_categoria INT,
@@ -222,17 +226,29 @@ CREATE FUNCTION fn_categoria_valida_para_edad(
 READS SQL DATA
 DETERMINISTIC
 BEGIN
-  DECLARE v_nombre_cat VARCHAR(100);
+  DECLARE v_edad_min INT DEFAULT NULL;
+  DECLARE v_edad_max INT DEFAULT NULL;
 
-  SELECT nombre INTO v_nombre_cat
+  SELECT edad_min, edad_max
+    INTO v_edad_min, v_edad_max
     FROM categoria WHERE id_categoria = p_id_categoria;
 
-  RETURN CASE v_nombre_cat
-    WHEN 'Cadete'  THEN (p_edad BETWEEN 14 AND 17)
-    WHEN 'Juvenil' THEN (p_edad BETWEEN 18 AND 23)
-    WHEN 'Senior'  THEN (p_edad >= 24)
-    ELSE 1
-  END;
+  -- Si no hay rangos definidos se permite cualquier edad
+  IF v_edad_min IS NULL AND v_edad_max IS NULL THEN
+    RETURN 1;
+  END IF;
+
+  -- Validar rango mínimo si está definido
+  IF v_edad_min IS NOT NULL AND p_edad < v_edad_min THEN
+    RETURN 0;
+  END IF;
+
+  -- Validar rango máximo si está definido (NULL = sin límite superior)
+  IF v_edad_max IS NOT NULL AND p_edad > v_edad_max THEN
+    RETURN 0;
+  END IF;
+
+  RETURN 1;
 END$$
 
 DELIMITER ;
