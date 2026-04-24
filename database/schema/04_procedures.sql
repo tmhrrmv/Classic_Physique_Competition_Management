@@ -13,9 +13,17 @@
 --        restantes sin intentar recalcular
 -- v1.2 - Añadido parámetro p_ip VARCHAR(45) a todos los sp_
 --        PHP pasa $_SERVER['REMOTE_ADDR'] como valor
---      - sp_inscribir_atleta: validación de edad del atleta
---        contra la categoría usando fn_edad_atleta y
---        fn_categoria_valida_para_edad
+--      - sp_inscribir_atleta: validación edad/categoría
+--        usando fn_edad_atleta y fn_categoria_valida_para_edad
+-- v1.3 - sp_calcular_resultados: valida que la competición
+--        esté cerrada antes de calcular el podio final
+--        (fn_estado_competicion debe devolver 'cerrada')
+--      - sp_anular_puntuacion: eliminado p_ip del CALL
+--        interno a sp_calcular_resultados, la IP ya está
+--        registrada en el log del procedimiento padre
+-- v1.4 - sp_calcular_resultados: bloquea también 'sin_fecha'
+--        Una competición sin fecha no puede tener resultados
+--        La fecha es la única fuente de verdad del estado
 -- ============================================================
 
 USE gestion_competiciones;
@@ -31,14 +39,17 @@ DELIMITER $$
 -- sp_inscribir_atleta
 -- Registra a un atleta en un evento con sus datos físicos.
 --
--- Validaciones:
+-- Validaciones en orden:
 -- 1. p_id_competicion no puede ser NULL
 -- 2. La competición debe existir
--- 3. Si no existe el atleta lo crea (fn_get_atleta_id)
--- 4. El atleta no puede estar ya inscrito en ese evento
--- 5. v1.2: edad del atleta válida para la categoría
---    (fn_edad_atleta + fn_categoria_valida_para_edad)
--- 6. El trigger valida peso/estatura y atleta activo
+-- 3. v1.2: edad del atleta válida para la categoría
+--    usando fn_edad_atleta + fn_categoria_valida_para_edad
+--    v1.3: fn_categoria_valida_para_edad lee edad_min/max
+--    dinámicamente desde tabla categoria (no hardcodeado)
+-- 4. Si el atleta no existe lo crea (fn_get_atleta_id)
+-- 5. El atleta no puede estar ya inscrito en ese evento
+-- 6. El trigger valida peso/estatura, atleta activo
+--    y competición no cerrada (fn_estado_competicion)
 --
 -- v1.2: añadido p_ip para log de auditoría
 -- ============================================================
@@ -73,19 +84,19 @@ BEGIN
     RESIGNAL;
   END;
 
-  -- Validar evento obligatorio
   IF p_id_competicion IS NULL THEN
     SIGNAL SQLSTATE '45000'
       SET MESSAGE_TEXT = 'Debes indicar el evento (p_id_competicion)';
   END IF;
 
-  -- Validar que la competición existe
   IF fn_competicion_existe(p_id_competicion) = 0 THEN
     SIGNAL SQLSTATE '45000'
       SET MESSAGE_TEXT = 'La competición indicada no existe';
   END IF;
 
   -- v1.2: validar edad del atleta contra la categoría
+  -- v1.3: fn_categoria_valida_para_edad lee rangos
+  --       dinámicamente desde tabla categoria
   IF p_id_categoria IS NOT NULL THEN
     SELECT fecha INTO v_fecha_evento
       FROM competicion WHERE id_competicion = p_id_competicion;
@@ -100,7 +111,6 @@ BEGIN
 
   START TRANSACTION;
 
-    -- Crear atleta si no existe, reutilizar si ya existe
     SET p_id_atleta_out = fn_get_atleta_id(p_nombre, p_apellido, p_fecha_nacimiento);
 
     IF p_id_atleta_out IS NULL THEN
@@ -109,13 +119,11 @@ BEGIN
       SET p_id_atleta_out = LAST_INSERT_ID();
     END IF;
 
-    -- Validar doble inscripción en el mismo evento
     IF fn_ya_inscrito(p_id_atleta_out, p_id_competicion) = 1 THEN
       SIGNAL SQLSTATE '45000'
         SET MESSAGE_TEXT = 'El atleta ya está inscrito en este evento';
     END IF;
 
-    -- Insertar inscripción (el trigger valida peso, estatura y atleta activo)
     INSERT INTO inscripcion
       (id_atleta, id_competicion, id_categoria, numero_dorsal, peso_registro, estatura_registro)
     VALUES
@@ -170,19 +178,16 @@ BEGIN
     RESIGNAL;
   END;
 
-  -- Validar ranking según reglamento: mínimo 1
   IF p_ranking IS NULL OR p_ranking < 1 THEN
     SIGNAL SQLSTATE '45000'
       SET MESSAGE_TEXT = 'El ranking debe ser un número positivo mayor o igual a 1';
   END IF;
 
-  -- Validar existencia de inscripción
   IF fn_inscripcion_existe(p_id_inscripcion) = 0 THEN
     SIGNAL SQLSTATE '45000'
       SET MESSAGE_TEXT = 'La inscripción indicada no existe';
   END IF;
 
-  -- Validar juez existe y está activo (v1.1)
   IF fn_juez_existe(p_id_juez) = 0 THEN
     SIGNAL SQLSTATE '45000'
       SET MESSAGE_TEXT = 'El juez no existe o está inactivo';
@@ -190,7 +195,6 @@ BEGIN
 
   START TRANSACTION;
 
-    -- UNIQUE KEY uq_puntuacion garantiza no duplicados
     INSERT INTO puntuacion (id_inscripcion, id_juez, ranking_otorgado)
     VALUES (p_id_inscripcion, p_id_juez, p_ranking);
 
@@ -211,11 +215,10 @@ END$$
 
 -- ============================================================
 -- sp_calcular_resultados
--- Calcula el podio de una competición aplicando el reglamento:
+-- Calcula el podio de una competición aplicando el reglamento.
 --
 -- Reglamento Classic Physique aplicado:
--- - 3+ jueces: descarta MAX y MIN de cada atleta,
---   calcula media de los restantes
+-- - 3+ jueces: descarta MAX y MIN, media de los restantes
 -- - <3 jueces: media simple como fallback
 -- - Ranking por categoría (Senior, Juvenil, Cadete separados)
 -- - Menor media = mejor puesto (1 = campeón)
@@ -223,6 +226,13 @@ END$$
 --
 -- v1.1: CONNECTION_ID() evita colisiones entre sesiones
 -- v1.2: añadido p_ip para log de auditoría
+-- v1.3: valida que la competición esté cerrada antes de
+--       calcular. No tiene sentido calcular el podio final
+--       de un evento que aún no ha terminado.
+--       Solo permite estados 'cerrada' o 'en_curso'.
+-- v1.4: bloquea también 'sin_fecha'. La fecha es la única
+--       fuente de verdad — sin fecha no hay estado válido
+--       y por tanto no se pueden calcular resultados.
 -- ============================================================
 CREATE PROCEDURE sp_calcular_resultados(
   IN p_id_competicion INT,
@@ -231,6 +241,7 @@ CREATE PROCEDURE sp_calcular_resultados(
 BEGIN
   DECLARE v_tabla_medias  VARCHAR(60);
   DECLARE v_tabla_ranking VARCHAR(60);
+  DECLARE v_estado        VARCHAR(20);
   DECLARE v_mensaje       VARCHAR(255);
 
   DECLARE EXIT HANDLER FOR SQLEXCEPTION
@@ -249,6 +260,15 @@ BEGIN
       SET MESSAGE_TEXT = 'La competición indicada no existe';
   END IF;
 
+  -- v1.3: solo calcular si la competición está en curso o cerrada
+-- v1.4: también bloquea 'sin_fecha' — la fecha es la única
+--       fuente de verdad, sin fecha no hay estado válido
+SET v_estado = fn_estado_competicion(p_id_competicion);
+  IF v_estado = 'abierta' OR v_estado = 'sin_fecha' THEN
+    SIGNAL SQLSTATE '45000'
+      SET MESSAGE_TEXT = 'Solo se pueden calcular resultados de competiciones en curso o cerradas';
+  END IF;
+
   IF fn_contar_puntuaciones_evento(p_id_competicion) = 0 THEN
     SIGNAL SQLSTATE '45000'
       SET MESSAGE_TEXT = 'No hay puntuaciones registradas para esta competición';
@@ -261,7 +281,6 @@ BEGIN
 
   START TRANSACTION;
 
-    -- Paso 1: media ajustada por atleta y categoría
     SET @sql = CONCAT(
       'CREATE TEMPORARY TABLE ', v_tabla_medias, ' AS
        SELECT i.id_inscripcion, i.id_categoria,
@@ -279,7 +298,6 @@ BEGIN
        GROUP BY i.id_inscripcion, i.id_categoria');
     PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
-    -- Paso 2: ranking por categoría (menor media = mejor puesto)
     SET @sql = CONCAT(
       'CREATE TEMPORARY TABLE ', v_tabla_ranking, ' AS
        SELECT id_inscripcion, id_categoria, media, n_jueces,
@@ -287,7 +305,6 @@ BEGIN
        FROM ', v_tabla_medias);
     PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
-    -- Paso 3: UPSERT en resultado_final
     SET @sql = CONCAT(
       'INSERT INTO resultado_final
          (id_inscripcion, id_competicion, id_categoria, ranking_final, media_ranking, num_jueces)
@@ -310,7 +327,7 @@ BEGIN
 
   INSERT INTO log_procedimientos (procedimiento, ip_origen, parametros, resultado, mensaje)
   VALUES ('sp_calcular_resultados', p_ip,
-          CONCAT('competicion=', p_id_competicion),
+          CONCAT('competicion=', p_id_competicion, ' estado=', v_estado),
           'ok', 'Resultados calculados correctamente');
 
   SELECT cat.nombre AS categoria, rf.ranking_final AS puesto,
@@ -332,8 +349,11 @@ END$$
 -- v1.1: gestión de 0 puntuaciones restantes:
 --   - Si quedan puntuaciones → recalcula normalmente
 --   - Si NO quedan → borra resultado_final directamente
---     (evita error en sp_calcular_resultados sin datos)
 -- v1.2: añadido p_ip para log de auditoría
+-- v1.3: eliminado p_ip del CALL interno a sp_calcular_resultados
+--       La IP ya está registrada en el log de este procedimiento.
+--       El CALL interno usa NULL como IP para evitar duplicar
+--       el registro de auditoría con la misma IP.
 -- ============================================================
 CREATE PROCEDURE sp_anular_puntuacion(
   IN  p_id_puntuacion   INT,
@@ -376,11 +396,11 @@ BEGIN
     SET v_puntuaciones_restantes = fn_contar_puntuaciones_evento(v_id_competicion);
 
     IF v_puntuaciones_restantes > 0 THEN
-      -- Quedan puntuaciones: recalcular el podio
-      CALL sp_calcular_resultados(v_id_competicion, p_ip);
+      -- v1.3: NULL como IP en el CALL interno para no duplicar
+      -- el registro de auditoría (ya está registrado arriba)
+      CALL sp_calcular_resultados(v_id_competicion, NULL);
     ELSE
       -- Sin puntuaciones: borrar resultado directamente
-      -- No tiene sentido recalcular con 0 datos
       DELETE FROM resultado_final WHERE id_competicion = v_id_competicion;
     END IF;
 
