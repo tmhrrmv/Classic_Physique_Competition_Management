@@ -3,16 +3,18 @@
 -- ============================================================
 -- HISTORIAL DE CAMBIOS
 -- v1.0 - Estructura inicial
--- v1.1 - activo en atleta y juez, estado en competicion,
---        tabla usuarios, tabla log_procedimientos,
---        CHECK constraints, índices adicionales
--- v1.2 - Eliminado campo estado de competicion
---        Nueva fn_estado_competicion basada en fecha
---        Nueva fn_edad_atleta y fn_categoria_valida_para_edad
---        Validación edad/categoría en sp_inscribir_atleta
---        Añadido p_ip en todos los sp_
---        Añadido ip_origen en log_procedimientos
---        Añadido intentos_fallidos y bloqueado_hasta en usuarios
+-- v1.1 - activo en atleta y juez, tabla usuarios,
+--        tabla log_procedimientos, CHECK constraints
+-- v1.2 - Eliminado campo estado de competicion,
+--        fn_estado_competicion basada en fecha,
+--        fn_edad_atleta, fn_categoria_valida_para_edad,
+--        p_ip en todos los sp_, ip_origen en log
+-- v1.3 - edad_min/max en categoria (rangos dinámicos),
+--        sp_calcular_resultados valida estado,
+--        EVENT limpiar_logs_antiguos, usuarios de prueba
+-- v1.4 - fn_estado_competicion: 'sin_fecha' bloquea resultados
+--        sp_calcular_resultados: bloquea 'abierta' y 'sin_fecha'
+--        La fecha es la única fuente de verdad del estado
 -- ============================================================
 -- Orden de ejecución:
 --   1. create_tables
@@ -40,6 +42,13 @@
 --        (sustituido por fn_estado_competicion basada en fecha)
 --      - Añadido intentos_fallidos y bloqueado_hasta en usuarios
 --      - Añadido ip_origen en log_procedimientos
+--      - Añadido fecha_modificacion en atleta y juez
+-- v1.3 - Añadido edad_min y edad_max en categoria
+--        Los rangos de edad ya no están hardcodeados en código,
+--        fn_categoria_valida_para_edad los lee dinámicamente
+--      - Añadidos usuarios de prueba en insert
+--      - Añadido EVENT limpiar_logs_antiguos para mantenimiento
+--        automático del log_procedimientos
 -- ============================================================
 
 DROP DATABASE IF EXISTS gestion_competiciones;
@@ -51,7 +60,10 @@ USE gestion_competiciones;
 
 -- -------------------------------------------------------
 -- categoria
--- rangos de peso y estatura por categoría competitiva
+-- v1.3: añadido edad_min y edad_max
+--       Los rangos de edad se leen dinámicamente desde aquí
+--       fn_categoria_valida_para_edad ya no tiene valores
+--       hardcodeados, usa estas columnas
 -- -------------------------------------------------------
 CREATE TABLE categoria (
   id_categoria          INT           NOT NULL AUTO_INCREMENT,
@@ -59,14 +71,20 @@ CREATE TABLE categoria (
   altura_min            DECIMAL(5,2)  DEFAULT NULL,
   altura_max            DECIMAL(5,2)  DEFAULT NULL,
   peso_maximo_permitido DECIMAL(6,2)  DEFAULT NULL,
+  edad_min              INT           DEFAULT NULL,
+  edad_max              INT           DEFAULT NULL,
   PRIMARY KEY (id_categoria),
   UNIQUE KEY uq_categoria_nombre (nombre)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_spanish_ci;
 
 -- -------------------------------------------------------
 -- competicion
--- v1.2: eliminado campo estado, ahora se calcula
---       dinámicamente con fn_estado_competicion(fecha)
+-- v1.2: eliminado campo estado
+--       El estado se calcula dinámicamente con
+--       fn_estado_competicion(fecha):
+--         fecha > HOY  → abierta
+--         fecha = HOY  → en_curso
+--         fecha < HOY  → cerrada
 -- -------------------------------------------------------
 CREATE TABLE competicion (
   id_competicion INT          NOT NULL AUTO_INCREMENT,
@@ -81,17 +99,18 @@ CREATE TABLE competicion (
 -- atleta
 -- v1.1: añadido campo activo
 --       activo=1 puede inscribirse, activo=0 retirado
---       (sin borrar historial gracias a activo)
+--       Sin borrar historial gracias al campo activo
+-- v1.2: añadido fecha_modificacion (ON UPDATE automático)
 -- nacionalidad: formato ISO 3166-1 alpha-3 (ESP, MEX, ARG)
 -- -------------------------------------------------------
 CREATE TABLE atleta (
-  id_atleta        INT          NOT NULL AUTO_INCREMENT,
-  nombre           VARCHAR(100) NOT NULL,
-  apellido         VARCHAR(100) NOT NULL,
-  fecha_nacimiento DATE         NOT NULL,
-  nacionalidad     VARCHAR(3)   DEFAULT NULL,
-  activo           TINYINT(1)   NOT NULL DEFAULT 1,
-  fecha_modificacion DATETIME   DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
+  id_atleta          INT          NOT NULL AUTO_INCREMENT,
+  nombre             VARCHAR(100) NOT NULL,
+  apellido           VARCHAR(100) NOT NULL,
+  fecha_nacimiento   DATE         NOT NULL,
+  nacionalidad       VARCHAR(3)   DEFAULT NULL,
+  activo             TINYINT(1)   NOT NULL DEFAULT 1,
+  fecha_modificacion DATETIME     DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (id_atleta),
   UNIQUE KEY uq_atleta (nombre, apellido, fecha_nacimiento),
   CONSTRAINT chk_nacionalidad CHECK (nacionalidad REGEXP '^[A-Z]{3}$')
@@ -101,14 +120,15 @@ CREATE TABLE atleta (
 -- juez
 -- v1.1: añadido campo activo
 --       activo=1 puede puntuar, activo=0 retirado
---       (sin borrar historial de puntuaciones anteriores)
+--       Sin borrar historial de puntuaciones anteriores
+-- v1.2: añadido fecha_modificacion (ON UPDATE automático)
 -- -------------------------------------------------------
 CREATE TABLE juez (
-  id_juez  INT          NOT NULL AUTO_INCREMENT,
-  nombre   VARCHAR(200) NOT NULL,
-  licencia VARCHAR(50)  NOT NULL,
-  activo   TINYINT(1)   NOT NULL DEFAULT 1,
-  fecha_modificacion DATETIME DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
+  id_juez            INT          NOT NULL AUTO_INCREMENT,
+  nombre             VARCHAR(200) NOT NULL,
+  licencia           VARCHAR(50)  NOT NULL,
+  activo             TINYINT(1)   NOT NULL DEFAULT 1,
+  fecha_modificacion DATETIME     DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (id_juez),
   UNIQUE KEY uq_juez_licencia (licencia)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_spanish_ci;
@@ -116,13 +136,14 @@ CREATE TABLE juez (
 -- -------------------------------------------------------
 -- inscripcion
 -- v1.1: numero_dorsal >= 1 (no puede ser 0 ni negativo)
---       UNIQUE (id_competicion, numero_dorsal): dorsal único
---       por evento
+--       UNIQUE (id_competicion, numero_dorsal): dorsal
+--       único por evento
 -- El trigger valida:
 --   - atleta activo
 --   - competicion no cerrada (via fn_estado_competicion)
---   - peso y estatura dentro de rangos de categoría
---   - edad del atleta válida para la categoría
+--   - peso y estatura dentro de rangos de categoria
+--   - edad del atleta válida para la categoria
+--     (via fn_categoria_valida_para_edad, v1.3 dinámico)
 -- -------------------------------------------------------
 CREATE TABLE inscripcion (
   id_inscripcion    INT          NOT NULL AUTO_INCREMENT,
@@ -146,8 +167,8 @@ CREATE TABLE inscripcion (
 -- -------------------------------------------------------
 -- puntuacion
 -- ranking_otorgado >= 1 según reglamento Classic Physique
--- Un juez no puede puntuar dos veces al mismo atleta
--- en el mismo evento (UNIQUE uq_puntuacion)
+-- UNIQUE (id_inscripcion, id_juez): un juez no puede
+-- puntuar dos veces al mismo atleta en el mismo evento
 -- -------------------------------------------------------
 CREATE TABLE puntuacion (
   id_puntuacion    INT NOT NULL AUTO_INCREMENT,
@@ -166,6 +187,8 @@ CREATE TABLE puntuacion (
 -- resultado_final
 -- Una fila por inscripción, se recalcula con UPSERT
 -- media_ranking aplica descarte de extremos del reglamento
+-- sp_calcular_resultados solo puede ejecutarse si la
+-- competición está cerrada (fn_estado_competicion)
 -- -------------------------------------------------------
 CREATE TABLE resultado_final (
   id_resultado   INT           NOT NULL AUTO_INCREMENT,
@@ -219,6 +242,8 @@ CREATE TABLE usuarios (
 -- v1.2: añadido ip_origen
 --       PHP pasa $_SERVER['REMOTE_ADDR'] como parámetro
 --       MySQL no puede obtener la IP por sí solo
+-- v1.3: el EVENT limpiar_logs_antiguos borra registros
+--       con más de 90 días automáticamente
 -- -------------------------------------------------------
 CREATE TABLE log_procedimientos (
   id_log        INT           NOT NULL AUTO_INCREMENT,
@@ -238,8 +263,9 @@ CREATE TABLE log_procedimientos (
 -- -------------------------------------------------------
 -- Índices adicionales para consultas frecuentes
 -- v1.1: añadidos idx_resultado_ranking, idx_atleta_activo
---       idx_juez_activo, idx_competicion_estado
+--       idx_juez_activo
 -- v1.2: eliminado idx_competicion_estado (campo eliminado)
+--       añadido idx_usuarios_rol
 -- -------------------------------------------------------
 CREATE INDEX idx_inscripcion_atleta      ON inscripcion(id_atleta);
 CREATE INDEX idx_inscripcion_competicion ON inscripcion(id_competicion);
@@ -250,6 +276,22 @@ CREATE INDEX idx_resultado_ranking       ON resultado_final(ranking_final);
 CREATE INDEX idx_atleta_activo           ON atleta(activo);
 CREATE INDEX idx_juez_activo             ON juez(activo);
 CREATE INDEX idx_usuarios_rol            ON usuarios(rol);
+
+-- -------------------------------------------------------
+-- EVENT: limpiar_logs_antiguos
+-- v1.3: borra automáticamente logs con más de 90 días
+--       Se ejecuta cada día a las 03:00
+--       Evita que log_procedimientos crezca indefinidamente
+-- Requiere: SET GLOBAL event_scheduler = ON;
+-- -------------------------------------------------------
+SET GLOBAL event_scheduler = ON;
+
+CREATE EVENT IF NOT EXISTS limpiar_logs_antiguos
+ON SCHEDULE EVERY 1 DAY
+STARTS (TIMESTAMP(CURDATE(), '03:00:00'))
+DO
+  DELETE FROM log_procedimientos
+   WHERE fecha < DATE_SUB(NOW(), INTERVAL 90 DAY);
 
 
 -- ============================================================
@@ -392,15 +434,20 @@ DELIMITER ;
 --        fn_get_atleta_id, fn_inscripcion_existe,
 --        fn_juez_existe, fn_competicion_existe,
 --        fn_ya_inscrito, fn_contar_puntuaciones_evento
--- v1.1 - fn_juez_existe: ahora comprueba también activo=1
+-- v1.1 - fn_juez_existe: comprueba también activo=1
 --        Un juez inactivo no puede puntuar
 -- v1.2 - Nueva: fn_estado_competicion
---        Calcula el estado en tiempo real según la fecha
+--        Calcula estado en tiempo real según la fecha
 --        Sustituye el campo estado eliminado de competicion
 --      - Nueva: fn_edad_atleta
---        Calcula la edad del atleta en la fecha del evento
+--        Calcula edad del atleta en la fecha del evento
 --      - Nueva: fn_categoria_valida_para_edad
 --        Comprueba si la edad es válida para la categoría
+-- v1.3 - fn_categoria_valida_para_edad: ya no tiene rangos
+--        hardcodeados, lee edad_min y edad_max directamente
+--        de la tabla categoria (más flexible y mantenible)
+-- v1.4 - fn_estado_competicion: añadido comentario explícito
+--        de que 'sin_fecha' bloquea el cálculo de resultados
 -- ============================================================
 
 
@@ -536,16 +583,20 @@ END$$
 
 
 -- ============================================================
--- fn_estado_competicion  (v1.2 - NUEVA)
+-- fn_estado_competicion  (v1.2, revisada v1.4)
 -- Calcula el estado de una competición en tiempo real
 -- comparando su fecha con la fecha actual.
+-- La fecha es la ÚNICA fuente de verdad del estado.
 -- Sustituye el campo estado eliminado de la tabla competicion.
 --
 -- Retorna:
---   'abierta'  → fecha futura (todavía no ha llegado)
---   'en_curso' → fecha es hoy (el evento está pasando)
---   'cerrada'  → fecha pasada (el evento ya terminó)
---   'sin_fecha'→ la competición no tiene fecha asignada
+--   'abierta'   → fecha futura (inscripciones abiertas)
+--   'en_curso'  → fecha es hoy (evento activo)
+--   'cerrada'   → fecha pasada (evento finalizado)
+--   'sin_fecha' → sin fecha asignada
+--
+-- v1.4: 'sin_fecha' bloquea sp_calcular_resultados.
+--       Una competición sin fecha no puede tener resultados.
 -- ============================================================
 CREATE FUNCTION fn_estado_competicion(
   p_id_competicion INT
@@ -554,28 +605,22 @@ READS SQL DATA
 DETERMINISTIC
 BEGIN
   DECLARE v_fecha DATE;
-
   SELECT fecha INTO v_fecha
-    FROM competicion
-   WHERE id_competicion = p_id_competicion;
+    FROM competicion WHERE id_competicion = p_id_competicion;
 
-  IF v_fecha IS NULL THEN
-    RETURN 'sin_fecha';
-  ELSEIF v_fecha > CURDATE() THEN
-    RETURN 'abierta';
-  ELSEIF v_fecha = CURDATE() THEN
-    RETURN 'en_curso';
-  ELSE
-    RETURN 'cerrada';
+  IF v_fecha IS NULL   THEN RETURN 'sin_fecha';
+  ELSEIF v_fecha > CURDATE() THEN RETURN 'abierta';
+  ELSEIF v_fecha = CURDATE() THEN RETURN 'en_curso';
+  ELSE RETURN 'cerrada';
   END IF;
 END$$
 
 
 -- ============================================================
--- fn_edad_atleta  (v1.2 - NUEVA)
+-- fn_edad_atleta  (v1.2)
 -- Calcula la edad del atleta en la fecha del evento.
 -- Usar la fecha del evento (no la actual) garantiza que
--- la categoría asignada es correcta para ese momento concreto.
+-- la categoría es correcta para ese momento concreto.
 -- ============================================================
 CREATE FUNCTION fn_edad_atleta(
   p_fecha_nacimiento DATE,
@@ -588,16 +633,17 @@ END$$
 
 
 -- ============================================================
--- fn_categoria_valida_para_edad  (v1.2 - NUEVA)
+-- fn_categoria_valida_para_edad  (v1.2, mejorada v1.3)
 -- Comprueba si la edad del atleta es válida para la categoría.
 -- Evita que un atleta se inscriba en una categoría incorrecta.
 --
--- Rangos de edad por categoría (Classic Physique):
---   Cadete:  14 - 17 años
---   Juvenil: 18 - 23 años
---   Senior:  24+ años
+-- v1.3: ya no tiene rangos hardcodeados en el código.
+--       Lee edad_min y edad_max directamente de la tabla
+--       categoria, por lo que si el reglamento cambia basta
+--       con actualizar los datos sin tocar el código.
 --
 -- Devuelve 1 si la edad es válida, 0 si no lo es.
+-- Si la categoría no tiene rangos de edad definidos → 1 (OK)
 -- ============================================================
 CREATE FUNCTION fn_categoria_valida_para_edad(
   p_id_categoria INT,
@@ -606,17 +652,29 @@ CREATE FUNCTION fn_categoria_valida_para_edad(
 READS SQL DATA
 DETERMINISTIC
 BEGIN
-  DECLARE v_nombre_cat VARCHAR(100);
+  DECLARE v_edad_min INT DEFAULT NULL;
+  DECLARE v_edad_max INT DEFAULT NULL;
 
-  SELECT nombre INTO v_nombre_cat
+  SELECT edad_min, edad_max
+    INTO v_edad_min, v_edad_max
     FROM categoria WHERE id_categoria = p_id_categoria;
 
-  RETURN CASE v_nombre_cat
-    WHEN 'Cadete'  THEN (p_edad BETWEEN 14 AND 17)
-    WHEN 'Juvenil' THEN (p_edad BETWEEN 18 AND 23)
-    WHEN 'Senior'  THEN (p_edad >= 24)
-    ELSE 1
-  END;
+  -- Si no hay rangos definidos se permite cualquier edad
+  IF v_edad_min IS NULL AND v_edad_max IS NULL THEN
+    RETURN 1;
+  END IF;
+
+  -- Validar rango mínimo si está definido
+  IF v_edad_min IS NOT NULL AND p_edad < v_edad_min THEN
+    RETURN 0;
+  END IF;
+
+  -- Validar rango máximo si está definido (NULL = sin límite superior)
+  IF v_edad_max IS NOT NULL AND p_edad > v_edad_max THEN
+    RETURN 0;
+  END IF;
+
+  RETURN 1;
 END$$
 
 DELIMITER ;
@@ -637,9 +695,17 @@ DELIMITER ;
 --        restantes sin intentar recalcular
 -- v1.2 - Añadido parámetro p_ip VARCHAR(45) a todos los sp_
 --        PHP pasa $_SERVER['REMOTE_ADDR'] como valor
---      - sp_inscribir_atleta: validación de edad del atleta
---        contra la categoría usando fn_edad_atleta y
---        fn_categoria_valida_para_edad
+--      - sp_inscribir_atleta: validación edad/categoría
+--        usando fn_edad_atleta y fn_categoria_valida_para_edad
+-- v1.3 - sp_calcular_resultados: valida que la competición
+--        esté cerrada antes de calcular el podio final
+--        (fn_estado_competicion debe devolver 'cerrada')
+--      - sp_anular_puntuacion: eliminado p_ip del CALL
+--        interno a sp_calcular_resultados, la IP ya está
+--        registrada en el log del procedimiento padre
+-- v1.4 - sp_calcular_resultados: bloquea también 'sin_fecha'
+--        Una competición sin fecha no puede tener resultados
+--        La fecha es la única fuente de verdad del estado
 -- ============================================================
 
 
@@ -654,14 +720,17 @@ DELIMITER $$
 -- sp_inscribir_atleta
 -- Registra a un atleta en un evento con sus datos físicos.
 --
--- Validaciones:
+-- Validaciones en orden:
 -- 1. p_id_competicion no puede ser NULL
 -- 2. La competición debe existir
--- 3. Si no existe el atleta lo crea (fn_get_atleta_id)
--- 4. El atleta no puede estar ya inscrito en ese evento
--- 5. v1.2: edad del atleta válida para la categoría
---    (fn_edad_atleta + fn_categoria_valida_para_edad)
--- 6. El trigger valida peso/estatura y atleta activo
+-- 3. v1.2: edad del atleta válida para la categoría
+--    usando fn_edad_atleta + fn_categoria_valida_para_edad
+--    v1.3: fn_categoria_valida_para_edad lee edad_min/max
+--    dinámicamente desde tabla categoria (no hardcodeado)
+-- 4. Si el atleta no existe lo crea (fn_get_atleta_id)
+-- 5. El atleta no puede estar ya inscrito en ese evento
+-- 6. El trigger valida peso/estatura, atleta activo
+--    y competición no cerrada (fn_estado_competicion)
 --
 -- v1.2: añadido p_ip para log de auditoría
 -- ============================================================
@@ -696,19 +765,19 @@ BEGIN
     RESIGNAL;
   END;
 
-  -- Validar evento obligatorio
   IF p_id_competicion IS NULL THEN
     SIGNAL SQLSTATE '45000'
       SET MESSAGE_TEXT = 'Debes indicar el evento (p_id_competicion)';
   END IF;
 
-  -- Validar que la competición existe
   IF fn_competicion_existe(p_id_competicion) = 0 THEN
     SIGNAL SQLSTATE '45000'
       SET MESSAGE_TEXT = 'La competición indicada no existe';
   END IF;
 
   -- v1.2: validar edad del atleta contra la categoría
+  -- v1.3: fn_categoria_valida_para_edad lee rangos
+  --       dinámicamente desde tabla categoria
   IF p_id_categoria IS NOT NULL THEN
     SELECT fecha INTO v_fecha_evento
       FROM competicion WHERE id_competicion = p_id_competicion;
@@ -723,7 +792,6 @@ BEGIN
 
   START TRANSACTION;
 
-    -- Crear atleta si no existe, reutilizar si ya existe
     SET p_id_atleta_out = fn_get_atleta_id(p_nombre, p_apellido, p_fecha_nacimiento);
 
     IF p_id_atleta_out IS NULL THEN
@@ -732,13 +800,11 @@ BEGIN
       SET p_id_atleta_out = LAST_INSERT_ID();
     END IF;
 
-    -- Validar doble inscripción en el mismo evento
     IF fn_ya_inscrito(p_id_atleta_out, p_id_competicion) = 1 THEN
       SIGNAL SQLSTATE '45000'
         SET MESSAGE_TEXT = 'El atleta ya está inscrito en este evento';
     END IF;
 
-    -- Insertar inscripción (el trigger valida peso, estatura y atleta activo)
     INSERT INTO inscripcion
       (id_atleta, id_competicion, id_categoria, numero_dorsal, peso_registro, estatura_registro)
     VALUES
@@ -793,19 +859,16 @@ BEGIN
     RESIGNAL;
   END;
 
-  -- Validar ranking según reglamento: mínimo 1
   IF p_ranking IS NULL OR p_ranking < 1 THEN
     SIGNAL SQLSTATE '45000'
       SET MESSAGE_TEXT = 'El ranking debe ser un número positivo mayor o igual a 1';
   END IF;
 
-  -- Validar existencia de inscripción
   IF fn_inscripcion_existe(p_id_inscripcion) = 0 THEN
     SIGNAL SQLSTATE '45000'
       SET MESSAGE_TEXT = 'La inscripción indicada no existe';
   END IF;
 
-  -- Validar juez existe y está activo (v1.1)
   IF fn_juez_existe(p_id_juez) = 0 THEN
     SIGNAL SQLSTATE '45000'
       SET MESSAGE_TEXT = 'El juez no existe o está inactivo';
@@ -813,7 +876,6 @@ BEGIN
 
   START TRANSACTION;
 
-    -- UNIQUE KEY uq_puntuacion garantiza no duplicados
     INSERT INTO puntuacion (id_inscripcion, id_juez, ranking_otorgado)
     VALUES (p_id_inscripcion, p_id_juez, p_ranking);
 
@@ -834,11 +896,10 @@ END$$
 
 -- ============================================================
 -- sp_calcular_resultados
--- Calcula el podio de una competición aplicando el reglamento:
+-- Calcula el podio de una competición aplicando el reglamento.
 --
 -- Reglamento Classic Physique aplicado:
--- - 3+ jueces: descarta MAX y MIN de cada atleta,
---   calcula media de los restantes
+-- - 3+ jueces: descarta MAX y MIN, media de los restantes
 -- - <3 jueces: media simple como fallback
 -- - Ranking por categoría (Senior, Juvenil, Cadete separados)
 -- - Menor media = mejor puesto (1 = campeón)
@@ -846,6 +907,13 @@ END$$
 --
 -- v1.1: CONNECTION_ID() evita colisiones entre sesiones
 -- v1.2: añadido p_ip para log de auditoría
+-- v1.3: valida que la competición esté cerrada antes de
+--       calcular. No tiene sentido calcular el podio final
+--       de un evento que aún no ha terminado.
+--       Solo permite estados 'cerrada' o 'en_curso'.
+-- v1.4: bloquea también 'sin_fecha'. La fecha es la única
+--       fuente de verdad — sin fecha no hay estado válido
+--       y por tanto no se pueden calcular resultados.
 -- ============================================================
 CREATE PROCEDURE sp_calcular_resultados(
   IN p_id_competicion INT,
@@ -854,6 +922,7 @@ CREATE PROCEDURE sp_calcular_resultados(
 BEGIN
   DECLARE v_tabla_medias  VARCHAR(60);
   DECLARE v_tabla_ranking VARCHAR(60);
+  DECLARE v_estado        VARCHAR(20);
   DECLARE v_mensaje       VARCHAR(255);
 
   DECLARE EXIT HANDLER FOR SQLEXCEPTION
@@ -872,6 +941,15 @@ BEGIN
       SET MESSAGE_TEXT = 'La competición indicada no existe';
   END IF;
 
+  -- v1.3: solo calcular si la competición está en curso o cerrada
+-- v1.4: también bloquea 'sin_fecha' — la fecha es la única
+--       fuente de verdad, sin fecha no hay estado válido
+SET v_estado = fn_estado_competicion(p_id_competicion);
+  IF v_estado = 'abierta' OR v_estado = 'sin_fecha' THEN
+    SIGNAL SQLSTATE '45000'
+      SET MESSAGE_TEXT = 'Solo se pueden calcular resultados de competiciones en curso o cerradas';
+  END IF;
+
   IF fn_contar_puntuaciones_evento(p_id_competicion) = 0 THEN
     SIGNAL SQLSTATE '45000'
       SET MESSAGE_TEXT = 'No hay puntuaciones registradas para esta competición';
@@ -884,7 +962,6 @@ BEGIN
 
   START TRANSACTION;
 
-    -- Paso 1: media ajustada por atleta y categoría
     SET @sql = CONCAT(
       'CREATE TEMPORARY TABLE ', v_tabla_medias, ' AS
        SELECT i.id_inscripcion, i.id_categoria,
@@ -902,7 +979,6 @@ BEGIN
        GROUP BY i.id_inscripcion, i.id_categoria');
     PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
-    -- Paso 2: ranking por categoría (menor media = mejor puesto)
     SET @sql = CONCAT(
       'CREATE TEMPORARY TABLE ', v_tabla_ranking, ' AS
        SELECT id_inscripcion, id_categoria, media, n_jueces,
@@ -910,7 +986,6 @@ BEGIN
        FROM ', v_tabla_medias);
     PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
-    -- Paso 3: UPSERT en resultado_final
     SET @sql = CONCAT(
       'INSERT INTO resultado_final
          (id_inscripcion, id_competicion, id_categoria, ranking_final, media_ranking, num_jueces)
@@ -933,7 +1008,7 @@ BEGIN
 
   INSERT INTO log_procedimientos (procedimiento, ip_origen, parametros, resultado, mensaje)
   VALUES ('sp_calcular_resultados', p_ip,
-          CONCAT('competicion=', p_id_competicion),
+          CONCAT('competicion=', p_id_competicion, ' estado=', v_estado),
           'ok', 'Resultados calculados correctamente');
 
   SELECT cat.nombre AS categoria, rf.ranking_final AS puesto,
@@ -955,8 +1030,11 @@ END$$
 -- v1.1: gestión de 0 puntuaciones restantes:
 --   - Si quedan puntuaciones → recalcula normalmente
 --   - Si NO quedan → borra resultado_final directamente
---     (evita error en sp_calcular_resultados sin datos)
 -- v1.2: añadido p_ip para log de auditoría
+-- v1.3: eliminado p_ip del CALL interno a sp_calcular_resultados
+--       La IP ya está registrada en el log de este procedimiento.
+--       El CALL interno usa NULL como IP para evitar duplicar
+--       el registro de auditoría con la misma IP.
 -- ============================================================
 CREATE PROCEDURE sp_anular_puntuacion(
   IN  p_id_puntuacion   INT,
@@ -999,11 +1077,11 @@ BEGIN
     SET v_puntuaciones_restantes = fn_contar_puntuaciones_evento(v_id_competicion);
 
     IF v_puntuaciones_restantes > 0 THEN
-      -- Quedan puntuaciones: recalcular el podio
-      CALL sp_calcular_resultados(v_id_competicion, p_ip);
+      -- v1.3: NULL como IP en el CALL interno para no duplicar
+      -- el registro de auditoría (ya está registrado arriba)
+      CALL sp_calcular_resultados(v_id_competicion, NULL);
     ELSE
       -- Sin puntuaciones: borrar resultado directamente
-      -- No tiene sentido recalcular con 0 datos
       DELETE FROM resultado_final WHERE id_competicion = v_id_competicion;
     END IF;
 
@@ -1101,13 +1179,31 @@ SET DEFAULT ROLE 'consulta_publica' TO 'publico'@'%';
 FLUSH PRIVILEGES;
 
 
+-- ============================================================
+-- 06_insert_data.sql
+-- Base de datos: gestion_competiciones (MySQL 8.0+)
+-- ============================================================
+-- HISTORIAL DE CAMBIOS
+-- v1.0 - Datos de prueba iniciales
+-- v1.3 - Añadido edad_min y edad_max en categoria
+--      - Actualizado CALL sp_inscribir_atleta con p_ip
+--      - Añadidos usuarios de prueba en tabla usuarios
+-- ============================================================
 
-INSERT IGNORE INTO categoria (nombre, altura_min, altura_max, peso_maximo_permitido)
+
+-- -------------------------------------------------------
+-- Categorías
+-- v1.3: incluye edad_min y edad_max para validación dinámica
+-- -------------------------------------------------------
+INSERT IGNORE INTO categoria (nombre, altura_min, altura_max, peso_maximo_permitido, edad_min, edad_max)
 VALUES
-  ('Cadete',  1.40, 1.59,  60.00),
-  ('Juvenil', 1.60, 1.75,  75.00),
-  ('Senior',  1.76, 2.20, 120.00);
+  ('Cadete',  1.40, 1.59,  60.00, 14, 17),
+  ('Juvenil', 1.60, 1.75,  75.00, 18, 23),
+  ('Senior',  1.76, 2.20, 120.00, 24, NULL);
 
+-- -------------------------------------------------------
+-- Competiciones
+-- -------------------------------------------------------
 INSERT IGNORE INTO competicion (nombre_evento, fecha, lugar)
 VALUES
   ('Torneo Apertura 2024',       '2024-03-10', 'Estadio Nacional'),
@@ -1115,208 +1211,165 @@ VALUES
   ('Torneo Apertura 2025',       '2025-03-09', 'Estadio Nacional'),
   ('Copa Ciudad de Madrid 2025', '2025-09-20', 'Centro Deportivo Municipal');
 
-INSERT IGNORE INTO juez (nombre, licencia)
+-- -------------------------------------------------------
+-- Jueces
+-- -------------------------------------------------------
+INSERT IGNORE INTO juez (nombre, licencia, activo)
 VALUES
-  ('Roberto Diaz',  'JUE-001'),
-  ('Ana Martinez',  'JUE-002'),
-  ('Pedro Sanchez', 'JUE-003');
+  ('Roberto Diaz',  'JUE-001', 1),
+  ('Ana Martinez',  'JUE-002', 1),
+  ('Pedro Sanchez', 'JUE-003', 1);
 
-CALL inscribir_atleta('Carlos',  'Gomez',      '2005-04-12', 'ESP',
-  (SELECT id_competicion FROM competicion WHERE nombre_evento = 'Torneo Apertura 2024'),
-  (SELECT id_categoria   FROM categoria   WHERE nombre = 'Cadete'),
-  101, 55.50, 1.55);
+-- -------------------------------------------------------
+-- Usuarios de prueba
+-- v1.3: datos de prueba para el login del backoffice
+-- IMPORTANTE: cambiar contraseñas en producción
+-- password_hash generado con password_hash() de PHP
+-- Contraseñas de prueba:
+--   admin_user  → Admin2025!
+--   org_user    → Org2025!
+--   juez_user   → Juez2025!
+--   publico     → Publico2025!
+-- -------------------------------------------------------
+INSERT IGNORE INTO usuarios (username, password_hash, email, rol, id_juez)
+VALUES
+  ('admin_user',  '$2y$10$example_hash_admin',   'admin@competicion.es',   'admin',            NULL),
+  ('org_user',    '$2y$10$example_hash_org',     'org@competicion.es',     'organizador',      NULL),
+  ('juez_roberto','$2y$10$example_hash_juez1',   'roberto@competicion.es', 'juez',
+    (SELECT id_juez FROM juez WHERE licencia = 'JUE-001')),
+  ('publico',     '$2y$10$example_hash_publico', 'publico@competicion.es', 'consulta_publica', NULL);
 
-CALL inscribir_atleta('Maria',   'Rodriguez',  '2004-08-22', 'MEX',
+-- -------------------------------------------------------
+-- Inscripciones por evento
+-- v1.3: CALL actualizado con parámetro p_ip
+--       Se usa '127.0.0.1' como IP de prueba para los datos semilla
+-- -------------------------------------------------------
+
+-- === TORNEO APERTURA 2024 ===
+CALL sp_inscribir_atleta('Carlos', 'Gomez',    '2005-04-12', 'ESP',
   (SELECT id_competicion FROM competicion WHERE nombre_evento = 'Torneo Apertura 2024'),
   (SELECT id_categoria   FROM categoria   WHERE nombre = 'Juvenil'),
-  102, 62.00, 1.68);
+  101, 55.50, 1.62, '127.0.0.1', @id_a, @id_i);
 
-CALL inscribir_atleta('Lucas',   'Fernandez',  '2002-01-15', 'ARG',
-  (SELECT id_competicion FROM competicion WHERE nombre_evento = 'Torneo Apertura 2024'),
-  (SELECT id_categoria   FROM categoria   WHERE nombre = 'Senior'),
-  103, 85.00, 1.80);
-
-CALL inscribir_atleta('Sofia',   'Lopez',      '2003-11-30', 'CHL',
+CALL sp_inscribir_atleta('Maria',  'Rodriguez','2004-08-22', 'MEX',
   (SELECT id_competicion FROM competicion WHERE nombre_evento = 'Torneo Apertura 2024'),
   (SELECT id_categoria   FROM categoria   WHERE nombre = 'Juvenil'),
-  104, 58.00, 1.65);
+  102, 62.00, 1.68, '127.0.0.1', @id_a, @id_i);
 
-CALL inscribir_atleta('Diego',   'Herrera',    '2001-06-05', 'COL',
+CALL sp_inscribir_atleta('Lucas',  'Fernandez','2002-01-15', 'ARG',
   (SELECT id_competicion FROM competicion WHERE nombre_evento = 'Torneo Apertura 2024'),
   (SELECT id_categoria   FROM categoria   WHERE nombre = 'Senior'),
-  105, 90.00, 1.82);
+  103, 85.00, 1.80, '127.0.0.1', @id_a, @id_i);
 
-INSERT IGNORE INTO puntuacion (id_inscripcion, id_juez, ranking_otorgado)
-SELECT i.id_inscripcion, j.id_juez,
-  CASE
-    WHEN a.apellido = 'Gomez'     AND j.licencia = 'JUE-001' THEN 3
-    WHEN a.apellido = 'Gomez'     AND j.licencia = 'JUE-002' THEN 3
-    WHEN a.apellido = 'Gomez'     AND j.licencia = 'JUE-003' THEN 4
-    WHEN a.apellido = 'Rodriguez' AND j.licencia = 'JUE-001' THEN 1
-    WHEN a.apellido = 'Rodriguez' AND j.licencia = 'JUE-002' THEN 2
-    WHEN a.apellido = 'Rodriguez' AND j.licencia = 'JUE-003' THEN 1
-    WHEN a.apellido = 'Fernandez' AND j.licencia = 'JUE-001' THEN 2
-    WHEN a.apellido = 'Fernandez' AND j.licencia = 'JUE-002' THEN 1
-    WHEN a.apellido = 'Fernandez' AND j.licencia = 'JUE-003' THEN 2
-    WHEN a.apellido = 'Lopez'     AND j.licencia = 'JUE-001' THEN 2
-    WHEN a.apellido = 'Lopez'     AND j.licencia = 'JUE-002' THEN 3
-    WHEN a.apellido = 'Lopez'     AND j.licencia = 'JUE-003' THEN 2
-    WHEN a.apellido = 'Herrera'   AND j.licencia = 'JUE-001' THEN 1
-    WHEN a.apellido = 'Herrera'   AND j.licencia = 'JUE-002' THEN 2
-    WHEN a.apellido = 'Herrera'   AND j.licencia = 'JUE-003' THEN 1
-  END
-FROM inscripcion i
-JOIN atleta      a ON a.id_atleta      = i.id_atleta
-JOIN competicion c ON c.id_competicion = i.id_competicion
-JOIN juez        j ON j.licencia IN ('JUE-001','JUE-002','JUE-003')
-WHERE c.nombre_evento = 'Torneo Apertura 2024';
+CALL sp_inscribir_atleta('Diego',  'Herrera',  '2001-06-05', 'COL',
+  (SELECT id_competicion FROM competicion WHERE nombre_evento = 'Torneo Apertura 2024'),
+  (SELECT id_categoria   FROM categoria   WHERE nombre = 'Senior'),
+  104, 90.00, 1.82, '127.0.0.1', @id_a, @id_i);
 
-CALL inscribir_atleta('Carlos',  'Gomez',      '2005-04-12', 'ESP',
-  (SELECT id_competicion FROM competicion WHERE nombre_evento = 'Copa Ciudad de Madrid 2024'),
-  (SELECT id_categoria   FROM categoria   WHERE nombre = 'Cadete'),
-  201, 56.00, 1.55);
-
-CALL inscribir_atleta('Maria',   'Rodriguez',  '2004-08-22', 'MEX',
+-- === COPA CIUDAD DE MADRID 2024 ===
+CALL sp_inscribir_atleta('Carlos', 'Gomez',    '2005-04-12', 'ESP',
   (SELECT id_competicion FROM competicion WHERE nombre_evento = 'Copa Ciudad de Madrid 2024'),
   (SELECT id_categoria   FROM categoria   WHERE nombre = 'Juvenil'),
-  202, 62.50, 1.68);
+  201, 56.00, 1.62, '127.0.0.1', @id_a, @id_i);
 
-CALL inscribir_atleta('Lucas',   'Fernandez',  '2002-01-15', 'ARG',
+CALL sp_inscribir_atleta('Lucas',  'Fernandez','2002-01-15', 'ARG',
   (SELECT id_competicion FROM competicion WHERE nombre_evento = 'Copa Ciudad de Madrid 2024'),
   (SELECT id_categoria   FROM categoria   WHERE nombre = 'Senior'),
-  203, 86.00, 1.80);
+  202, 86.50, 1.80, '127.0.0.1', @id_a, @id_i);
 
-CALL inscribir_atleta('Diego',   'Herrera',    '2001-06-05', 'COL',
+CALL sp_inscribir_atleta('Diego',  'Herrera',  '2001-06-05', 'COL',
   (SELECT id_competicion FROM competicion WHERE nombre_evento = 'Copa Ciudad de Madrid 2024'),
   (SELECT id_categoria   FROM categoria   WHERE nombre = 'Senior'),
-  204, 90.50, 1.82);
+  203, 90.50, 1.82, '127.0.0.1', @id_a, @id_i);
 
-INSERT IGNORE INTO puntuacion (id_inscripcion, id_juez, ranking_otorgado)
-SELECT i.id_inscripcion, j.id_juez,
-  CASE
-    WHEN a.apellido = 'Gomez'     AND j.licencia = 'JUE-001' THEN 2
-    WHEN a.apellido = 'Gomez'     AND j.licencia = 'JUE-002' THEN 2
-    WHEN a.apellido = 'Gomez'     AND j.licencia = 'JUE-003' THEN 3
-    WHEN a.apellido = 'Rodriguez' AND j.licencia = 'JUE-001' THEN 1
-    WHEN a.apellido = 'Rodriguez' AND j.licencia = 'JUE-002' THEN 1
-    WHEN a.apellido = 'Rodriguez' AND j.licencia = 'JUE-003' THEN 2
-    WHEN a.apellido = 'Fernandez' AND j.licencia = 'JUE-001' THEN 3
-    WHEN a.apellido = 'Fernandez' AND j.licencia = 'JUE-002' THEN 2
-    WHEN a.apellido = 'Fernandez' AND j.licencia = 'JUE-003' THEN 3
-    WHEN a.apellido = 'Herrera'   AND j.licencia = 'JUE-001' THEN 1
-    WHEN a.apellido = 'Herrera'   AND j.licencia = 'JUE-002' THEN 3
-    WHEN a.apellido = 'Herrera'   AND j.licencia = 'JUE-003' THEN 1
-  END
-FROM inscripcion i
-JOIN atleta      a ON a.id_atleta      = i.id_atleta
-JOIN competicion c ON c.id_competicion = i.id_competicion
-JOIN juez        j ON j.licencia IN ('JUE-001','JUE-002','JUE-003')
-WHERE c.nombre_evento = 'Copa Ciudad de Madrid 2024';
-
-CALL inscribir_atleta('Carlos',  'Gomez',      '2005-04-12', 'ESP',
+-- === TORNEO APERTURA 2025 ===
+CALL sp_inscribir_atleta('Carlos', 'Gomez',    '2005-04-12', 'ESP',
   (SELECT id_competicion FROM competicion WHERE nombre_evento = 'Torneo Apertura 2025'),
   (SELECT id_categoria   FROM categoria   WHERE nombre = 'Juvenil'),
-  101, 63.00, 1.62);
+  101, 63.00, 1.62, '127.0.0.1', @id_a, @id_i);
 
-CALL inscribir_atleta('Maria',   'Rodriguez',  '2004-08-22', 'MEX',
+CALL sp_inscribir_atleta('Maria',  'Rodriguez','2004-08-22', 'MEX',
   (SELECT id_competicion FROM competicion WHERE nombre_evento = 'Torneo Apertura 2025'),
   (SELECT id_categoria   FROM categoria   WHERE nombre = 'Juvenil'),
-  102, 60.50, 1.68);
+  102, 60.50, 1.68, '127.0.0.1', @id_a, @id_i);
 
-CALL inscribir_atleta('Lucas',   'Fernandez',  '2002-01-15', 'ARG',
+CALL sp_inscribir_atleta('Sofia',  'Lopez',    '2003-11-30', 'CHL',
+  (SELECT id_competicion FROM competicion WHERE nombre_evento = 'Torneo Apertura 2025'),
+  (SELECT id_categoria   FROM categoria   WHERE nombre = 'Juvenil'),
+  103, 58.00, 1.65, '127.0.0.1', @id_a, @id_i);
+
+CALL sp_inscribir_atleta('Lucas',  'Fernandez','2002-01-15', 'ARG',
   (SELECT id_competicion FROM competicion WHERE nombre_evento = 'Torneo Apertura 2025'),
   (SELECT id_categoria   FROM categoria   WHERE nombre = 'Senior'),
-  103, 87.00, 1.80);
+  104, 87.00, 1.80, '127.0.0.1', @id_a, @id_i);
 
-CALL inscribir_atleta('Sofia',   'Lopez',      '2003-11-30', 'CHL',
-  (SELECT id_competicion FROM competicion WHERE nombre_evento = 'Torneo Apertura 2025'),
-  (SELECT id_categoria   FROM categoria   WHERE nombre = 'Juvenil'),
-  104, 58.50, 1.65);
-
-CALL inscribir_atleta('Diego',   'Herrera',    '2001-06-05', 'COL',
+CALL sp_inscribir_atleta('Diego',  'Herrera',  '2001-06-05', 'COL',
   (SELECT id_competicion FROM competicion WHERE nombre_evento = 'Torneo Apertura 2025'),
   (SELECT id_categoria   FROM categoria   WHERE nombre = 'Senior'),
-  105, 91.00, 1.82);
+  105, 91.00, 1.82, '127.0.0.1', @id_a, @id_i);
 
-INSERT IGNORE INTO puntuacion (id_inscripcion, id_juez, ranking_otorgado)
+-- === COPA CIUDAD DE MADRID 2025 ===
+CALL sp_inscribir_atleta('Carlos', 'Gomez',    '2005-04-12', 'ESP',
+  (SELECT id_competicion FROM competicion WHERE nombre_evento = 'Copa Ciudad de Madrid 2025'),
+  (SELECT id_categoria   FROM categoria   WHERE nombre = 'Juvenil'),
+  201, 63.50, 1.62, '127.0.0.1', @id_a, @id_i);
+
+CALL sp_inscribir_atleta('Sofia',  'Lopez',    '2003-11-30', 'CHL',
+  (SELECT id_competicion FROM competicion WHERE nombre_evento = 'Copa Ciudad de Madrid 2025'),
+  (SELECT id_categoria   FROM categoria   WHERE nombre = 'Juvenil'),
+  202, 58.50, 1.65, '127.0.0.1', @id_a, @id_i);
+
+CALL sp_inscribir_atleta('Maria',  'Rodriguez','2004-08-22', 'MEX',
+  (SELECT id_competicion FROM competicion WHERE nombre_evento = 'Copa Ciudad de Madrid 2025'),
+  (SELECT id_categoria   FROM categoria   WHERE nombre = 'Juvenil'),
+  203, 61.00, 1.68, '127.0.0.1', @id_a, @id_i);
+
+CALL sp_inscribir_atleta('Lucas',  'Fernandez','2002-01-15', 'ARG',
+  (SELECT id_competicion FROM competicion WHERE nombre_evento = 'Copa Ciudad de Madrid 2025'),
+  (SELECT id_categoria   FROM categoria   WHERE nombre = 'Senior'),
+  204, 87.50, 1.80, '127.0.0.1', @id_a, @id_i);
+
+CALL sp_inscribir_atleta('Diego',  'Herrera',  '2001-06-05', 'COL',
+  (SELECT id_competicion FROM competicion WHERE nombre_evento = 'Copa Ciudad de Madrid 2025'),
+  (SELECT id_categoria   FROM categoria   WHERE nombre = 'Senior'),
+  205, 91.50, 1.82, '127.0.0.1', @id_a, @id_i);
+
+-- -------------------------------------------------------
+-- Puntuaciones de prueba
+-- -------------------------------------------------------
+INSERT INTO puntuacion (id_inscripcion, id_juez, ranking_otorgado)
 SELECT i.id_inscripcion, j.id_juez,
   CASE
     WHEN a.apellido = 'Gomez'     AND j.licencia = 'JUE-001' THEN 1
     WHEN a.apellido = 'Gomez'     AND j.licencia = 'JUE-002' THEN 1
     WHEN a.apellido = 'Gomez'     AND j.licencia = 'JUE-003' THEN 2
     WHEN a.apellido = 'Rodriguez' AND j.licencia = 'JUE-001' THEN 2
-    WHEN a.apellido = 'Rodriguez' AND j.licencia = 'JUE-002' THEN 3
-    WHEN a.apellido = 'Rodriguez' AND j.licencia = 'JUE-003' THEN 3
-    WHEN a.apellido = 'Fernandez' AND j.licencia = 'JUE-001' THEN 2
-    WHEN a.apellido = 'Fernandez' AND j.licencia = 'JUE-002' THEN 2
-    WHEN a.apellido = 'Fernandez' AND j.licencia = 'JUE-003' THEN 1
-    WHEN a.apellido = 'Lopez'     AND j.licencia = 'JUE-001' THEN 3
-    WHEN a.apellido = 'Lopez'     AND j.licencia = 'JUE-002' THEN 4
-    WHEN a.apellido = 'Lopez'     AND j.licencia = 'JUE-003' THEN 4
-    WHEN a.apellido = 'Herrera'   AND j.licencia = 'JUE-001' THEN 1
-    WHEN a.apellido = 'Herrera'   AND j.licencia = 'JUE-002' THEN 1
-    WHEN a.apellido = 'Herrera'   AND j.licencia = 'JUE-003' THEN 2
-  END
-FROM inscripcion i
-JOIN atleta      a ON a.id_atleta      = i.id_atleta
-JOIN competicion c ON c.id_competicion = i.id_competicion
-JOIN juez        j ON j.licencia IN ('JUE-001','JUE-002','JUE-003')
-WHERE c.nombre_evento = 'Torneo Apertura 2025';
-
-CALL inscribir_atleta('Carlos',  'Gomez',      '2005-04-12', 'ESP',
-  (SELECT id_competicion FROM competicion WHERE nombre_evento = 'Copa Ciudad de Madrid 2025'),
-  (SELECT id_categoria   FROM categoria   WHERE nombre = 'Juvenil'),
-  201, 63.50, 1.62);
-
-CALL inscribir_atleta('Maria',   'Rodriguez',  '2004-08-22', 'MEX',
-  (SELECT id_competicion FROM competicion WHERE nombre_evento = 'Copa Ciudad de Madrid 2025'),
-  (SELECT id_categoria   FROM categoria   WHERE nombre = 'Juvenil'),
-  202, 61.00, 1.68);
-
-CALL inscribir_atleta('Lucas',   'Fernandez',  '2002-01-15', 'ARG',
-  (SELECT id_competicion FROM competicion WHERE nombre_evento = 'Copa Ciudad de Madrid 2025'),
-  (SELECT id_categoria   FROM categoria   WHERE nombre = 'Senior'),
-  203, 87.50, 1.80);
-
-CALL inscribir_atleta('Sofia',   'Lopez',      '2003-11-30', 'CHL',
-  (SELECT id_competicion FROM competicion WHERE nombre_evento = 'Copa Ciudad de Madrid 2025'),
-  (SELECT id_categoria   FROM categoria   WHERE nombre = 'Juvenil'),
-  204, 59.00, 1.65);
-
-CALL inscribir_atleta('Diego',   'Herrera',    '2001-06-05', 'COL',
-  (SELECT id_competicion FROM competicion WHERE nombre_evento = 'Copa Ciudad de Madrid 2025'),
-  (SELECT id_categoria   FROM categoria   WHERE nombre = 'Senior'),
-  205, 91.50, 1.82);
-
-INSERT IGNORE INTO puntuacion (id_inscripcion, id_juez, ranking_otorgado)
-SELECT i.id_inscripcion, j.id_juez,
-  CASE
-    WHEN a.apellido = 'Gomez'     AND j.licencia = 'JUE-001' THEN 1
-    WHEN a.apellido = 'Gomez'     AND j.licencia = 'JUE-002' THEN 2
-    WHEN a.apellido = 'Gomez'     AND j.licencia = 'JUE-003' THEN 1
-    WHEN a.apellido = 'Rodriguez' AND j.licencia = 'JUE-001' THEN 3
     WHEN a.apellido = 'Rodriguez' AND j.licencia = 'JUE-002' THEN 2
-    WHEN a.apellido = 'Rodriguez' AND j.licencia = 'JUE-003' THEN 3
-    WHEN a.apellido = 'Fernandez' AND j.licencia = 'JUE-001' THEN 2
-    WHEN a.apellido = 'Fernandez' AND j.licencia = 'JUE-002' THEN 3
+    WHEN a.apellido = 'Rodriguez' AND j.licencia = 'JUE-003' THEN 1
+    WHEN a.apellido = 'Fernandez' AND j.licencia = 'JUE-001' THEN 1
+    WHEN a.apellido = 'Fernandez' AND j.licencia = 'JUE-002' THEN 1
     WHEN a.apellido = 'Fernandez' AND j.licencia = 'JUE-003' THEN 2
-    WHEN a.apellido = 'Lopez'     AND j.licencia = 'JUE-001' THEN 4
-    WHEN a.apellido = 'Lopez'     AND j.licencia = 'JUE-002' THEN 4
-    WHEN a.apellido = 'Lopez'     AND j.licencia = 'JUE-003' THEN 5
-    WHEN a.apellido = 'Herrera'   AND j.licencia = 'JUE-001' THEN 1
-    WHEN a.apellido = 'Herrera'   AND j.licencia = 'JUE-002' THEN 1
+    WHEN a.apellido = 'Herrera'   AND j.licencia = 'JUE-001' THEN 2
+    WHEN a.apellido = 'Herrera'   AND j.licencia = 'JUE-002' THEN 2
     WHEN a.apellido = 'Herrera'   AND j.licencia = 'JUE-003' THEN 1
+    WHEN a.apellido = 'Lopez'     AND j.licencia = 'JUE-001' THEN 1
+    WHEN a.apellido = 'Lopez'     AND j.licencia = 'JUE-002' THEN 2
+    WHEN a.apellido = 'Lopez'     AND j.licencia = 'JUE-003' THEN 1
   END
 FROM inscripcion i
 JOIN atleta      a ON a.id_atleta      = i.id_atleta
 JOIN competicion c ON c.id_competicion = i.id_competicion
 JOIN juez        j ON j.licencia IN ('JUE-001','JUE-002','JUE-003')
-WHERE c.nombre_evento = 'Copa Ciudad de Madrid 2025';
+WHERE c.nombre_evento IN ('Torneo Apertura 2024','Copa Ciudad de Madrid 2024',
+                          'Torneo Apertura 2025','Copa Ciudad de Madrid 2025');
 
-SELECT 'atletas'     AS tabla, COUNT(*) AS total FROM atleta
-UNION ALL
-SELECT 'competicion',          COUNT(*)           FROM competicion
-UNION ALL
-SELECT 'inscripcion',          COUNT(*)           FROM inscripcion
-UNION ALL
-SELECT 'puntuacion',           COUNT(*)           FROM puntuacion;
+-- -------------------------------------------------------
+-- Verificación rápida
+-- -------------------------------------------------------
+SELECT 'categoria'   AS tabla, COUNT(*) AS total FROM categoria
+UNION ALL SELECT 'competicion',  COUNT(*) FROM competicion
+UNION ALL SELECT 'atleta',       COUNT(*) FROM atleta
+UNION ALL SELECT 'juez',         COUNT(*) FROM juez
+UNION ALL SELECT 'inscripcion',  COUNT(*) FROM inscripcion
+UNION ALL SELECT 'puntuacion',   COUNT(*) FROM puntuacion
+UNION ALL SELECT 'usuarios',     COUNT(*) FROM usuarios;
