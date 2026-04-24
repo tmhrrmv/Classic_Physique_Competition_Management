@@ -15,6 +15,13 @@
 --        (sustituido por fn_estado_competicion basada en fecha)
 --      - Añadido intentos_fallidos y bloqueado_hasta en usuarios
 --      - Añadido ip_origen en log_procedimientos
+--      - Añadido fecha_modificacion en atleta y juez
+-- v1.3 - Añadido edad_min y edad_max en categoria
+--        Los rangos de edad ya no están hardcodeados en código,
+--        fn_categoria_valida_para_edad los lee dinámicamente
+--      - Añadidos usuarios de prueba en insert
+--      - Añadido EVENT limpiar_logs_antiguos para mantenimiento
+--        automático del log_procedimientos
 -- ============================================================
 
 DROP DATABASE IF EXISTS gestion_competiciones;
@@ -26,7 +33,10 @@ USE gestion_competiciones;
 
 -- -------------------------------------------------------
 -- categoria
--- rangos de peso y estatura por categoría competitiva
+-- v1.3: añadido edad_min y edad_max
+--       Los rangos de edad se leen dinámicamente desde aquí
+--       fn_categoria_valida_para_edad ya no tiene valores
+--       hardcodeados, usa estas columnas
 -- -------------------------------------------------------
 CREATE TABLE categoria (
   id_categoria          INT           NOT NULL AUTO_INCREMENT,
@@ -34,14 +44,20 @@ CREATE TABLE categoria (
   altura_min            DECIMAL(5,2)  DEFAULT NULL,
   altura_max            DECIMAL(5,2)  DEFAULT NULL,
   peso_maximo_permitido DECIMAL(6,2)  DEFAULT NULL,
+  edad_min              INT           DEFAULT NULL,
+  edad_max              INT           DEFAULT NULL,
   PRIMARY KEY (id_categoria),
   UNIQUE KEY uq_categoria_nombre (nombre)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_spanish_ci;
 
 -- -------------------------------------------------------
 -- competicion
--- v1.2: eliminado campo estado, ahora se calcula
---       dinámicamente con fn_estado_competicion(fecha)
+-- v1.2: eliminado campo estado
+--       El estado se calcula dinámicamente con
+--       fn_estado_competicion(fecha):
+--         fecha > HOY  → abierta
+--         fecha = HOY  → en_curso
+--         fecha < HOY  → cerrada
 -- -------------------------------------------------------
 CREATE TABLE competicion (
   id_competicion INT          NOT NULL AUTO_INCREMENT,
@@ -56,17 +72,18 @@ CREATE TABLE competicion (
 -- atleta
 -- v1.1: añadido campo activo
 --       activo=1 puede inscribirse, activo=0 retirado
---       (sin borrar historial gracias a activo)
+--       Sin borrar historial gracias al campo activo
+-- v1.2: añadido fecha_modificacion (ON UPDATE automático)
 -- nacionalidad: formato ISO 3166-1 alpha-3 (ESP, MEX, ARG)
 -- -------------------------------------------------------
 CREATE TABLE atleta (
-  id_atleta        INT          NOT NULL AUTO_INCREMENT,
-  nombre           VARCHAR(100) NOT NULL,
-  apellido         VARCHAR(100) NOT NULL,
-  fecha_nacimiento DATE         NOT NULL,
-  nacionalidad     VARCHAR(3)   DEFAULT NULL,
-  activo           TINYINT(1)   NOT NULL DEFAULT 1,
-  fecha_modificacion DATETIME   DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
+  id_atleta          INT          NOT NULL AUTO_INCREMENT,
+  nombre             VARCHAR(100) NOT NULL,
+  apellido           VARCHAR(100) NOT NULL,
+  fecha_nacimiento   DATE         NOT NULL,
+  nacionalidad       VARCHAR(3)   DEFAULT NULL,
+  activo             TINYINT(1)   NOT NULL DEFAULT 1,
+  fecha_modificacion DATETIME     DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (id_atleta),
   UNIQUE KEY uq_atleta (nombre, apellido, fecha_nacimiento),
   CONSTRAINT chk_nacionalidad CHECK (nacionalidad REGEXP '^[A-Z]{3}$')
@@ -76,14 +93,15 @@ CREATE TABLE atleta (
 -- juez
 -- v1.1: añadido campo activo
 --       activo=1 puede puntuar, activo=0 retirado
---       (sin borrar historial de puntuaciones anteriores)
+--       Sin borrar historial de puntuaciones anteriores
+-- v1.2: añadido fecha_modificacion (ON UPDATE automático)
 -- -------------------------------------------------------
 CREATE TABLE juez (
-  id_juez  INT          NOT NULL AUTO_INCREMENT,
-  nombre   VARCHAR(200) NOT NULL,
-  licencia VARCHAR(50)  NOT NULL,
-  activo   TINYINT(1)   NOT NULL DEFAULT 1,
-  fecha_modificacion DATETIME DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
+  id_juez            INT          NOT NULL AUTO_INCREMENT,
+  nombre             VARCHAR(200) NOT NULL,
+  licencia           VARCHAR(50)  NOT NULL,
+  activo             TINYINT(1)   NOT NULL DEFAULT 1,
+  fecha_modificacion DATETIME     DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (id_juez),
   UNIQUE KEY uq_juez_licencia (licencia)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_spanish_ci;
@@ -91,13 +109,14 @@ CREATE TABLE juez (
 -- -------------------------------------------------------
 -- inscripcion
 -- v1.1: numero_dorsal >= 1 (no puede ser 0 ni negativo)
---       UNIQUE (id_competicion, numero_dorsal): dorsal único
---       por evento
+--       UNIQUE (id_competicion, numero_dorsal): dorsal
+--       único por evento
 -- El trigger valida:
 --   - atleta activo
 --   - competicion no cerrada (via fn_estado_competicion)
---   - peso y estatura dentro de rangos de categoría
---   - edad del atleta válida para la categoría
+--   - peso y estatura dentro de rangos de categoria
+--   - edad del atleta válida para la categoria
+--     (via fn_categoria_valida_para_edad, v1.3 dinámico)
 -- -------------------------------------------------------
 CREATE TABLE inscripcion (
   id_inscripcion    INT          NOT NULL AUTO_INCREMENT,
@@ -121,8 +140,8 @@ CREATE TABLE inscripcion (
 -- -------------------------------------------------------
 -- puntuacion
 -- ranking_otorgado >= 1 según reglamento Classic Physique
--- Un juez no puede puntuar dos veces al mismo atleta
--- en el mismo evento (UNIQUE uq_puntuacion)
+-- UNIQUE (id_inscripcion, id_juez): un juez no puede
+-- puntuar dos veces al mismo atleta en el mismo evento
 -- -------------------------------------------------------
 CREATE TABLE puntuacion (
   id_puntuacion    INT NOT NULL AUTO_INCREMENT,
@@ -141,6 +160,8 @@ CREATE TABLE puntuacion (
 -- resultado_final
 -- Una fila por inscripción, se recalcula con UPSERT
 -- media_ranking aplica descarte de extremos del reglamento
+-- sp_calcular_resultados solo puede ejecutarse si la
+-- competición está cerrada (fn_estado_competicion)
 -- -------------------------------------------------------
 CREATE TABLE resultado_final (
   id_resultado   INT           NOT NULL AUTO_INCREMENT,
@@ -194,6 +215,8 @@ CREATE TABLE usuarios (
 -- v1.2: añadido ip_origen
 --       PHP pasa $_SERVER['REMOTE_ADDR'] como parámetro
 --       MySQL no puede obtener la IP por sí solo
+-- v1.3: el EVENT limpiar_logs_antiguos borra registros
+--       con más de 90 días automáticamente
 -- -------------------------------------------------------
 CREATE TABLE log_procedimientos (
   id_log        INT           NOT NULL AUTO_INCREMENT,
@@ -213,8 +236,9 @@ CREATE TABLE log_procedimientos (
 -- -------------------------------------------------------
 -- Índices adicionales para consultas frecuentes
 -- v1.1: añadidos idx_resultado_ranking, idx_atleta_activo
---       idx_juez_activo, idx_competicion_estado
+--       idx_juez_activo
 -- v1.2: eliminado idx_competicion_estado (campo eliminado)
+--       añadido idx_usuarios_rol
 -- -------------------------------------------------------
 CREATE INDEX idx_inscripcion_atleta      ON inscripcion(id_atleta);
 CREATE INDEX idx_inscripcion_competicion ON inscripcion(id_competicion);
@@ -225,3 +249,19 @@ CREATE INDEX idx_resultado_ranking       ON resultado_final(ranking_final);
 CREATE INDEX idx_atleta_activo           ON atleta(activo);
 CREATE INDEX idx_juez_activo             ON juez(activo);
 CREATE INDEX idx_usuarios_rol            ON usuarios(rol);
+
+-- -------------------------------------------------------
+-- EVENT: limpiar_logs_antiguos
+-- v1.3: borra automáticamente logs con más de 90 días
+--       Se ejecuta cada día a las 03:00
+--       Evita que log_procedimientos crezca indefinidamente
+-- Requiere: SET GLOBAL event_scheduler = ON;
+-- -------------------------------------------------------
+SET GLOBAL event_scheduler = ON;
+
+CREATE EVENT IF NOT EXISTS limpiar_logs_antiguos
+ON SCHEDULE EVERY 1 DAY
+STARTS (TIMESTAMP(CURDATE(), '03:00:00'))
+DO
+  DELETE FROM log_procedimientos
+   WHERE fecha < DATE_SUB(NOW(), INTERVAL 90 DAY);
