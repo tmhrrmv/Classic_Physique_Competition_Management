@@ -14,11 +14,17 @@ declare(strict_types=1);
 // v1.2 - Eliminado intentos_fallidos de respuestas de error
 //      - Base64 URL-safe en JWT
 //      - Validación de formato username
-// v1.3 - Mejora 1: validación longitud mínima de password (8 chars)
-//      - Mejora 3: getConnection() movido justo antes del primer uso
-//      - Mejora 4: new DateTime() guardada en variable $ahora
-//        para no instanciarla dos veces
-//      - MAX_INTENTOS y BLOQUEO_MINUTOS leídos desde config.php
+// v1.3 - getConnection() movido justo antes del primer uso
+//      - new DateTime() guardada en variable $ahora
+//      - MAX_INTENTOS y BLOQUEO_MINUTOS desde config.php
+// v1.4 - Validación de JSON body antes de usarlo
+//      - Mensaje genérico en validación de password
+// v1.5 - Mejora 3: verificar que password_hash no sea vacío
+//        o NULL antes de llamar a password_verify
+//        Evita comportamiento inesperado con hashes inválidos
+//      - Mejora 5: límite de longitud máxima de password (1024)
+//        Evita ataque DoS enviando contraseñas enormes para
+//        hacer lenta la verificación bcrypt
 // ============================================================
 
 require_once __DIR__ . '/../config.php';
@@ -31,7 +37,17 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     exit;
 }
 
-$data = json_decode(file_get_contents('php://input'), true);
+// -------------------------------------------------------
+// Validar que el body sea JSON válido
+// -------------------------------------------------------
+$body = file_get_contents('php://input');
+$data = json_decode($body, true);
+
+if (!is_array($data)) {
+    http_response_code(400);
+    echo json_encode(['error' => 'El cuerpo de la petición debe ser JSON válido']);
+    exit;
+}
 
 if (empty($data['username']) || empty($data['password'])) {
     http_response_code(400);
@@ -52,25 +68,27 @@ if (!preg_match('/^[a-zA-Z0-9_]{3,50}$/', $username)) {
 }
 
 // -------------------------------------------------------
-// v1.3 mejora 1: validar longitud mínima de password
-// empty() no detecta '        ' (espacios) como vacío
+// Validar password
+// Mínimo 8 chars — mensaje genérico para no revelar política
+// v1.5 mejora 5: máximo 1024 chars para evitar DoS con bcrypt
 // -------------------------------------------------------
 $password = $data['password'];
+$pass_len = strlen(trim($password));
 
-if (strlen(trim($password)) < 8) {
+if ($pass_len < 8 || $pass_len > 1024) {
     http_response_code(400);
-    echo json_encode(['error' => 'La contraseña debe tener al menos 8 caracteres']);
+    echo json_encode(['error' => 'Credenciales incorrectas']);
     exit;
 }
 
 // -------------------------------------------------------
-// v1.3 mejora 3: getConnection() justo antes del primer uso
-// Si las validaciones anteriores fallan no se abre conexión
+// getConnection() justo antes del primer uso real
 // -------------------------------------------------------
 $pdo = getConnection();
 
 // -------------------------------------------------------
 // 1. Buscar usuario en la BD
+// username tiene UNIQUE KEY que actúa como índice
 // -------------------------------------------------------
 $stmt = $pdo->prepare(
     'SELECT id_usuario, username, password_hash, rol, id_juez,
@@ -82,8 +100,6 @@ $stmt = $pdo->prepare(
 $stmt->execute([$username]);
 $user = $stmt->fetch();
 
-// Mismo mensaje que contraseña incorrecta
-// para no revelar si el usuario existe o no
 if (!$user) {
     http_response_code(401);
     echo json_encode(['error' => 'Credenciales incorrectas']);
@@ -100,8 +116,19 @@ if ((int) $user['activo'] === 0) {
 }
 
 // -------------------------------------------------------
+// v1.5 mejora 3: verificar que password_hash sea válido
+// antes de llamar a password_verify — un hash vacío o NULL
+// daría comportamiento inesperado
+// -------------------------------------------------------
+if (empty($user['password_hash'])) {
+    http_response_code(500);
+    echo json_encode(['error' => 'Error interno. Contacta con el administrador']);
+    exit;
+}
+
+// -------------------------------------------------------
 // 3. Verificar bloqueo por intentos fallidos
-// v1.3 mejora 4: $ahora instanciado una sola vez
+// $ahora instanciado una sola vez y reutilizado
 // -------------------------------------------------------
 $ahora = new DateTime();
 
@@ -120,7 +147,6 @@ if ($user['bloqueado_hasta'] !== null) {
         exit;
     }
 
-    // El bloqueo expiró — resetear
     $pdo->prepare(
         'UPDATE usuarios SET intentos_fallidos = 0, bloqueado_hasta = NULL WHERE id_usuario = ?'
     )->execute([$user['id_usuario']]);
@@ -131,7 +157,6 @@ if ($user['bloqueado_hasta'] !== null) {
 
 // -------------------------------------------------------
 // 4. Verificar contraseña
-// MAX_INTENTOS y BLOQUEO_MINUTOS desde config.php
 // -------------------------------------------------------
 if (!password_verify($password, $user['password_hash'])) {
 
@@ -173,7 +198,6 @@ $pdo->prepare(
 
 // -------------------------------------------------------
 // 6. Generar JWT con rol e id_juez
-//    iss y aud desde config.php (v1.3)
 // -------------------------------------------------------
 $token = generateJwt([
     'sub'     => $user['username'],
