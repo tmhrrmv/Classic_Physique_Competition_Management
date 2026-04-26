@@ -19,10 +19,10 @@ declare(strict_types=1);
 // ============================================================
 
 require_once __DIR__ . '/../config.php';
+require_once __DIR__ . '/../helpers.php';
 require_once __DIR__ . '/../config/db.php';
 require_once __DIR__ . '/../middleware/auth.php';
 require_once __DIR__ . '/../middleware/roles.php';
-require_once __DIR__ . '/../helpers.php';
 
 $method   = $_SERVER['REQUEST_METHOD'];
 $pdo      = getConnection();
@@ -36,7 +36,7 @@ switch ($method) {
     //        juez solo ve las suyas
     case 'GET':
         $payload = requireAuth();
-        handleGet($pdo, $payload);
+        handlePuntGet($pdo, $payload);
         break;
 
     // POST /api/puntuaciones → registrar puntuación via sp_registrar_puntuacion
@@ -45,7 +45,7 @@ switch ($method) {
         validateContentType();
         $payload = requireAuth();
         requireRole($payload, ROLE_ADMIN, ROLE_JUEZ);
-        handlePost($pdo, $payload, $raw_body);
+        handlePuntPost($pdo, $payload, $raw_body);
         break;
 
     // PUT/PATCH /api/puntuaciones?id=X → corregir ranking
@@ -55,7 +55,7 @@ switch ($method) {
         validateContentType();
         $payload = requireAuth();
         requireRole($payload, ROLE_ADMIN, ROLE_JUEZ);
-        handlePut($pdo, $payload, $raw_body);
+        handlePuntPut($pdo, $payload, $raw_body);
         break;
 
     // DELETE /api/puntuaciones?id=X → anular via sp_anular_puntuacion
@@ -64,7 +64,7 @@ switch ($method) {
     case 'DELETE':
         $payload = requireAuth();
         requireRole($payload, ROLE_ADMIN);
-        handleDelete($pdo, $payload);
+        handlePuntDelete($pdo, $payload);
         break;
 
     default:
@@ -75,7 +75,7 @@ switch ($method) {
 // GET
 // Juez solo ve sus propias puntuaciones (id_juez del JWT)
 // -------------------------------------------------------
-function handleGet(PDO $pdo, array $payload): void
+function handlePuntGet(PDO $pdo, array $payload): void
 {
     $id_inscripcion = validateIntPositive(filter_input(INPUT_GET, 'id_inscripcion', FILTER_VALIDATE_INT));
     $id_competicion = validateIntPositive(filter_input(INPUT_GET, 'id_competicion', FILTER_VALIDATE_INT));
@@ -154,7 +154,7 @@ function handleGet(PDO $pdo, array $payload): void
 // -------------------------------------------------------
 // POST — registrar puntuación via sp_registrar_puntuacion
 // -------------------------------------------------------
-function handlePost(PDO $pdo, array $payload, string $raw_body): void
+function handlePuntPost(PDO $pdo, array $payload, string $raw_body): void
 {
     $data = validateJsonBody($raw_body);
     if (!$data) {
@@ -239,7 +239,7 @@ function handlePost(PDO $pdo, array $payload, string $raw_body): void
 // PUT/PATCH — corregir ranking de una puntuación
 // Juez solo puede corregir la suya
 // -------------------------------------------------------
-function handlePut(PDO $pdo, array $payload, string $raw_body): void
+function handlePuntPut(PDO $pdo, array $payload, string $raw_body): void
 {
     $id = validateIntPositive(filter_input(INPUT_GET, 'id', FILTER_VALIDATE_INT));
     if (!$id) {
@@ -293,7 +293,7 @@ function handlePut(PDO $pdo, array $payload, string $raw_body): void
 // DELETE — anular puntuación via sp_anular_puntuacion
 // Recalcula resultados automáticamente
 // -------------------------------------------------------
-function handleDelete(PDO $pdo, array $payload): void
+function handlePuntDelete(PDO $pdo, array $payload): void
 {
     $id = validateIntPositive(filter_input(INPUT_GET, 'id', FILTER_VALIDATE_INT));
     if (!$id) {
