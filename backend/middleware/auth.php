@@ -8,33 +8,45 @@ declare(strict_types=1);
 // v1.0 - JWT básico con Base64 estándar
 // v1.1 - Añadido requireAuth y verifyJwt
 // v1.2 - Base64 URL-safe en generateJwt y verifyJwt
-// v1.3 - Mejora 5: validación de espacios extra en header
-//      - Mejora 6: iss y aud en JWT desde config.php
-//      - Mejora 7: función isTokenExpired() separada
-//      - Mejora 8: verifyJwt devuelve razón específica
-//        en lugar de null silencioso para facilitar debugging
+// v1.3 - Validación espacios extra en header Authorization
+//      - iss y aud en JWT desde config.php
+//      - isTokenExpired() separada
+//      - verifyJwt devuelve razón específica del error
+// v1.4 - Comprobación de longitud antes de hash_equals
+//      - Validación de que payload sea objeto JSON
+//      - base64url_decode valida resultado
+// v1.5 - Mejora 6: generateJwt verifica que json_encode
+//        no falle antes de construir el JWT
+//      - Mejora 7: detección de array numérico mejorada
+//        usando empty() para cubrir payload vacío {}
+//      - Mejora 8: límite de longitud del token en
+//        requireAuth (máx 2048 chars) para evitar tokens
+//        de tamaño arbitrario
 // ============================================================
 
 require_once __DIR__ . '/../config.php';
 
+// Longitud máxima permitida para un JWT
+// v1.5 mejora 8: evita procesar tokens de tamaño arbitrario
+define('JWT_MAX_LENGTH', 2048);
+
 // -------------------------------------------------------
 // v1.2: helpers Base64 URL-safe
-// PHP no tiene base64url nativo, se implementa manualmente
-// Sustituye +→- /→_ y elimina =
 // -------------------------------------------------------
 function base64url_encode(string $data): string
 {
     return rtrim(strtr(base64_encode($data), '+/', '-_'), '=');
 }
 
-function base64url_decode(string $data): string
+// v1.4: base64url_decode valida el resultado
+function base64url_decode(string $data): ?string
 {
-    return base64_decode(strtr($data, '-_', '+/'));
+    $decoded = base64_decode(strtr($data, '-_', '+/'), true);
+    return $decoded === false ? null : $decoded;
 }
 
 // -------------------------------------------------------
-// v1.3 mejora 7: isTokenExpired() separada
-// Comprueba si el token ha expirado
+// v1.3: isTokenExpired() separada
 // -------------------------------------------------------
 function isTokenExpired(array $payload): bool
 {
@@ -43,24 +55,30 @@ function isTokenExpired(array $payload): bool
 
 // -------------------------------------------------------
 // requireAuth
-// Extrae y verifica el JWT del header Authorization.
-// v1.3 mejora 5: limpia espacios extra del header
+// v1.3: limpia espacios extra con preg_match
+// v1.5 mejora 8: límite de longitud del token
 // -------------------------------------------------------
 function requireAuth(): array
 {
     $header = trim($_SERVER['HTTP_AUTHORIZATION'] ?? '');
 
-    // v1.3 mejora 5: trim() y verificar Bearer con un solo espacio
     if (!preg_match('/^Bearer\s+(\S+)$/', $header, $matches)) {
         http_response_code(401);
         echo json_encode(['error' => 'Token de autorización requerido']);
         exit;
     }
 
-    $token  = $matches[1];
+    $token = $matches[1];
+
+    // v1.5 mejora 8: rechazar tokens demasiado largos
+    if (strlen($token) > JWT_MAX_LENGTH) {
+        http_response_code(401);
+        echo json_encode(['error' => 'Token inválido']);
+        exit;
+    }
+
     $result = verifyJwt($token);
 
-    // v1.3 mejora 8: verifyJwt devuelve array con payload o error
     if (isset($result['error'])) {
         http_response_code(401);
         echo json_encode(['error' => $result['error']]);
@@ -72,9 +90,8 @@ function requireAuth(): array
 
 // -------------------------------------------------------
 // verifyJwt
-// v1.2: usa base64url_decode
-// v1.3 mejora 8: devuelve ['payload' => ...] si válido
-//               o ['error' => '...'] con razón específica
+// v1.4: longitud antes de hash_equals, validación payload
+// v1.5 mejora 7: detección de array numérico mejorada
 // -------------------------------------------------------
 function verifyJwt(string $token): array
 {
@@ -85,28 +102,42 @@ function verifyJwt(string $token): array
 
     [$headerB64, $payloadB64, $signatureB64] = $parts;
 
-    // Verificar firma
     $expectedSig = base64url_encode(
         hash_hmac('sha256', "$headerB64.$payloadB64", JWT_SECRET, true)
     );
+
+    // v1.4: verificar longitud antes de hash_equals
+    if (strlen($expectedSig) !== strlen($signatureB64)) {
+        return ['error' => 'Firma del token inválida'];
+    }
 
     if (!hash_equals($expectedSig, $signatureB64)) {
         return ['error' => 'Firma del token inválida'];
     }
 
-    // Decodificar payload
-    $payload = json_decode(base64url_decode($payloadB64), true);
+    // v1.4: base64url_decode con validación
+    $payloadJson = base64url_decode($payloadB64);
+    if ($payloadJson === null) {
+        return ['error' => 'Payload del token no es Base64 válido'];
+    }
 
-    if (!is_array($payload)) {
+    $payload = json_decode($payloadJson, true);
+
+    // v1.5 mejora 7: detección mejorada de payload inválido
+    // Cubre array numérico [] y payload vacío {}
+    if (!is_array($payload) || empty($payload)) {
         return ['error' => 'Payload del token inválido'];
     }
 
-    // v1.3 mejora 7: usar isTokenExpired()
+    // Verificar que no sea array numérico (JSON [])
+    if (isset($payload[0])) {
+        return ['error' => 'Payload del token inválido'];
+    }
+
     if (isTokenExpired($payload)) {
         return ['error' => 'Token expirado'];
     }
 
-    // v1.3 mejora 6: verificar iss y aud
     if (($payload['iss'] ?? '') !== JWT_ISS) {
         return ['error' => 'Token emitido por sistema no reconocido'];
     }
@@ -120,21 +151,31 @@ function verifyJwt(string $token): array
 
 // -------------------------------------------------------
 // generateJwt
-// v1.2: usa base64url_encode
-// v1.3 mejora 6: añade iss y aud al payload
+// v1.2: base64url_encode
+// v1.3: iss y aud al payload
+// v1.5 mejora 6: verifica que json_encode no falle
 // -------------------------------------------------------
 function generateJwt(array $data): string
 {
-    $header  = base64url_encode(json_encode(['alg' => 'HS256', 'typ' => 'JWT']));
-
-    // v1.3 mejora 6: iss y aud desde config.php
-    $payload = base64url_encode(json_encode(array_merge($data, [
+    $headerJson = json_encode(['alg' => 'HS256', 'typ' => 'JWT']);
+    $payloadData = array_merge($data, [
         'exp' => time() + JWT_TTL,
         'iss' => JWT_ISS,
         'aud' => JWT_AUD,
-    ])));
+    ]);
+    $payloadJson = json_encode($payloadData);
 
-    $sig = base64url_encode(hash_hmac('sha256', "$header.$payload", JWT_SECRET, true));
+    // v1.5 mejora 6: json_encode puede devolver false
+    // si hay valores no serializables en $data
+    if ($headerJson === false || $payloadJson === false) {
+        http_response_code(500);
+        echo json_encode(['error' => 'Error interno al generar el token']);
+        exit;
+    }
+
+    $header  = base64url_encode($headerJson);
+    $payload = base64url_encode($payloadJson);
+    $sig     = base64url_encode(hash_hmac('sha256', "$header.$payload", JWT_SECRET, true));
 
     return "$header.$payload.$sig";
 }
