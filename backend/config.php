@@ -2,18 +2,19 @@
 declare(strict_types=1);
 
 // ============================================================
-// config.php — Configuración general del proyecto
+// config.php
 // ============================================================
 // HISTORIAL DE CAMBIOS
 // v1.0 - Configuración inicial
 // v1.1 - JWT_TTL y APP_ENV
 // v1.2 - MAX_INTENTOS, BLOQUEO_MINUTOS, JWT_ISS, JWT_AUD
-// v1.3 - JWT_SECRET forzado en producción, DB_PORT numérico
-//        ALLOWED_ORIGIN desde variable de entorno
+// v1.3 - JWT_SECRET forzado en producción
+//        DB_PORT numérico, ALLOWED_ORIGIN desde env
 // v1.4 - DB_NAME, DB_USER, DB_PASS validados
 //        APP_ENV validado contra valores conocidos
-// v1.5 - Mejora 6: TRUSTED_PROXIES para validar X-Forwarded-For
-//        Solo se confía en IPs de proxies conocidos
+// v1.5 - TRUSTED_PROXIES para validar X-Forwarded-For
+//        X-Request-ID para trazabilidad
+//        APP_URL para Location headers
 // ============================================================
 
 $app_env = getenv('APP_ENV') ?: 'development';
@@ -49,8 +50,8 @@ if (APP_ENV === 'production') {
     }
 }
 define('DB_NAME', $db_name ?: 'gestion_competiciones');
-define('DB_USER', $db_user ?: 'tu_usuario');
-define('DB_PASS', $db_pass ?: 'tu_password');
+define('DB_USER', $db_user ?: 'root');
+define('DB_PASS', $db_pass ?: '');
 
 // JWT
 $jwt_secret = getenv('JWT_SECRET') ?: 'cambia_este_secreto_en_produccion';
@@ -67,32 +68,28 @@ define('JWT_AUD',    'backoffice');
 // Seguridad
 define('MAX_INTENTOS',    5);
 define('BLOQUEO_MINUTOS', 15);
-
-// v1.5 mejora 6: IPs de proxies de confianza
-// Solo se usa X-Forwarded-For si la petición viene de estos proxies
-// En Railway el proxy interno tiene IPs privadas
 define('TRUSTED_PROXIES', explode(',', getenv('TRUSTED_PROXIES') ?: '127.0.0.1,::1'));
 
-// CORS
+// App URL para Location headers
+define('APP_URL', rtrim(getenv('APP_URL') ?: 'http://localhost', '/'));
+
+// Request ID para trazabilidad
+$request_id = $_SERVER['HTTP_X_REQUEST_ID'] ?? bin2hex(random_bytes(8));
+if (!preg_match('/^[a-zA-Z0-9\-]{1,64}$/', $request_id)) {
+    $request_id = bin2hex(random_bytes(8));
+}
+define('REQUEST_ID', $request_id);
+
+// Cabeceras globales
 header('Content-Type: application/json; charset=utf-8');
-if (APP_DEBUG) {
-    $allowed_origin = getenv('ALLOWED_ORIGIN') ?: '*';
-    header('Access-Control-Allow-Origin: ' . $allowed_origin);
+header('X-Request-ID: ' . REQUEST_ID);
+
+$allowed_origin = getenv('ALLOWED_ORIGIN') ?: (APP_DEBUG ? '*' : '');
+if ($allowed_origin !== '') {
+    header('Access-Control-Allow-Origin: '     . $allowed_origin);
     header('Access-Control-Allow-Methods: GET, POST, PUT, PATCH, DELETE, OPTIONS');
     header('Access-Control-Allow-Headers: Content-Type, Authorization, X-Request-ID');
-} else {
-    $allowed_origin = getenv('ALLOWED_ORIGIN') ?: '';
-    if ($allowed_origin !== '') {
-        header('Access-Control-Allow-Origin: ' . $allowed_origin);
-        header('Access-Control-Allow-Methods: GET, POST, PUT, PATCH, DELETE, OPTIONS');
-        header('Access-Control-Allow-Headers: Content-Type, Authorization, X-Request-ID');
-    }
 }
-
-// v1.5 mejora 28: X-Request-ID para trazabilidad
-$request_id = $_SERVER['HTTP_X_REQUEST_ID'] ?? bin2hex(random_bytes(8));
-header('X-Request-ID: ' . $request_id);
-define('REQUEST_ID', $request_id);
 
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     http_response_code(204);
