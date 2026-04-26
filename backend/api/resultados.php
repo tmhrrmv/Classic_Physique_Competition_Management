@@ -21,10 +21,10 @@ declare(strict_types=1);
 // ============================================================
 
 require_once __DIR__ . '/../config.php';
+require_once __DIR__ . '/../helpers.php';
 require_once __DIR__ . '/../config/db.php';
 require_once __DIR__ . '/../middleware/auth.php';
 require_once __DIR__ . '/../middleware/roles.php';
-require_once __DIR__ . '/../helpers.php';
 
 $method   = $_SERVER['REQUEST_METHOD'];
 $pdo      = getConnection();
@@ -37,7 +37,7 @@ switch ($method) {
     // GET /api/resultados?id_atleta=X               → historial de rankings
     // Accesible para todos los roles
     case 'GET':
-        handleGet($pdo);
+        handleResGet($pdo);
         break;
 
     // POST /api/resultados → calcular podio via sp_calcular_resultados
@@ -47,7 +47,7 @@ switch ($method) {
         validateContentType();
         $payload = requireAuth();
         requireRole($payload, ROLE_ADMIN);
-        handlePost($pdo, $payload, $raw_body);
+        handleResPost($pdo, $payload, $raw_body);
         break;
 
     // DELETE /api/resultados?id_competicion=X → limpiar resultados
@@ -56,7 +56,7 @@ switch ($method) {
     case 'DELETE':
         $payload = requireAuth();
         requireRole($payload, ROLE_ADMIN);
-        handleDelete($pdo);
+        handleResDelete($pdo);
         break;
 
     default:
@@ -66,7 +66,7 @@ switch ($method) {
 // -------------------------------------------------------
 // GET
 // -------------------------------------------------------
-function handleGet(PDO $pdo): void
+function handleResGet(PDO $pdo): void
 {
     $id_competicion = validateIntPositive(filter_input(INPUT_GET, 'id_competicion', FILTER_VALIDATE_INT));
     $id_atleta      = validateIntPositive(filter_input(INPUT_GET, 'id_atleta',      FILTER_VALIDATE_INT));
@@ -195,7 +195,7 @@ function handleGet(PDO $pdo): void
 // POST — calcular resultados via sp_calcular_resultados
 // El sp_ valida que la competición esté en_curso o cerrada
 // -------------------------------------------------------
-function handlePost(PDO $pdo, array $payload, string $raw_body): void
+function handleResPost(PDO $pdo, array $payload, string $raw_body): void
 {
     $data = validateJsonBody($raw_body);
     if (!$data) {
@@ -240,7 +240,7 @@ function handlePost(PDO $pdo, array $payload, string $raw_body): void
 // Solo si la competición está abierta o sin_fecha
 // No tiene sentido borrar resultados de un evento cerrado
 // -------------------------------------------------------
-function handleDelete(PDO $pdo): void
+function handleResDelete(PDO $pdo): void
 {
     $id_competicion = validateIntPositive(filter_input(INPUT_GET, 'id_competicion', FILTER_VALIDATE_INT));
     if (!$id_competicion) {
