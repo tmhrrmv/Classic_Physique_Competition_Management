@@ -28,10 +28,10 @@ declare(strict_types=1);
 // ============================================================
 
 require_once __DIR__ . '/../config.php';
+require_once __DIR__ . '/../helpers.php';
 require_once __DIR__ . '/../config/db.php';
 require_once __DIR__ . '/../middleware/auth.php';
 require_once __DIR__ . '/../middleware/roles.php';
-require_once __DIR__ . '/../helpers.php';
 
 $method   = $_SERVER['REQUEST_METHOD'];
 $pdo      = getConnection();
@@ -44,7 +44,7 @@ switch ($method) {
     // GET /api/competiciones?estado=X → filtrar por estado
     // Accesible para todos los roles
     case 'GET':
-        handleGet($pdo);
+        handleCompGet($pdo);
         break;
 
     // POST /api/competiciones → crear evento
@@ -53,7 +53,7 @@ switch ($method) {
         validateContentType();
         $payload = requireAuth();
         requireRole($payload, ROLE_ADMIN, ROLE_ORGANIZADOR);
-        handlePost($pdo, $raw_body);
+        handleCompPost($pdo, $raw_body);
         break;
 
     // PUT/PATCH /api/competiciones?id=X → actualizar evento
@@ -63,7 +63,7 @@ switch ($method) {
         validateContentType();
         $payload = requireAuth();
         requireRole($payload, ROLE_ADMIN, ROLE_ORGANIZADOR);
-        handlePut($pdo, $raw_body);
+        handleCompPut($pdo, $raw_body);
         break;
 
     // DELETE /api/competiciones?id=X → eliminar evento
@@ -72,7 +72,7 @@ switch ($method) {
     case 'DELETE':
         $payload = requireAuth();
         requireRole($payload, ROLE_ADMIN);
-        handleDelete($pdo);
+        handleCompDelete($pdo);
         break;
 
     default:
@@ -82,7 +82,7 @@ switch ($method) {
 // -------------------------------------------------------
 // GET
 // -------------------------------------------------------
-function handleGet(PDO $pdo): void
+function handleCompGet(PDO $pdo): void
 {
     $id = validateIntPositive(filter_input(INPUT_GET, 'id', FILTER_VALIDATE_INT));
 
@@ -158,7 +158,7 @@ function handleGet(PDO $pdo): void
 // -------------------------------------------------------
 // POST — crear competición
 // -------------------------------------------------------
-function handlePost(PDO $pdo, string $raw_body): void
+function handleCompPost(PDO $pdo, string $raw_body): void
 {
     $data = validateJsonBody($raw_body);
     if (!$data) {
@@ -237,7 +237,7 @@ function handlePost(PDO $pdo, string $raw_body): void
 // -------------------------------------------------------
 // PUT/PATCH — actualizar competición
 // -------------------------------------------------------
-function handlePut(PDO $pdo, string $raw_body): void
+function handleCompPut(PDO $pdo, string $raw_body): void
 {
     $id = validateIntPositive(filter_input(INPUT_GET, 'id', FILTER_VALIDATE_INT));
     if (!$id) {
@@ -318,7 +318,7 @@ function handlePut(PDO $pdo, string $raw_body): void
 // La BD tiene ON DELETE CASCADE en inscripcion y resultado_final
 // Solo admin puede eliminar — acción irreversible
 // -------------------------------------------------------
-function handleDelete(PDO $pdo): void
+function handleCompDelete(PDO $pdo): void
 {
     $id = validateIntPositive(filter_input(INPUT_GET, 'id', FILTER_VALIDATE_INT));
     if (!$id) {
