@@ -1,5 +1,5 @@
 <?php
-// Punto de entrada para Railway
+
 // Redirige según la ruta solicitada
 $uri = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
 
