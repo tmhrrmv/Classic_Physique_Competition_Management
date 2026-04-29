@@ -3,6 +3,6 @@
 }
 
 :80 {
-    root * /app     Raíz del proyecto en mi caso en railway
+    root * /app     #Raíz del proyecto en mi caso en railway
     php_server      #sirve para ejecutar PHP internamente sin necesidad de PHP-FPM externo
 }
