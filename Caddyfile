@@ -1,8 +1,8 @@
 {
-    frankenphp
+    frankenphp   # esto lo utilizamos para activar  el motor de php de frankenphp 
 }
 
 :80 {
-    root * /app
-    php_server
+    root * /app     Raíz del proyecto en mi caso en railway
+    php_server      #sirve para ejecutar PHP internamente sin necesidad de PHP-FPM externo
 }
