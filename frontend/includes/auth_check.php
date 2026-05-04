@@ -20,19 +20,21 @@ declare(strict_types=1);
 //        redirectToLogin() con ?reason= en URL
 //        destroySession() centralizado
 // v1.3 - Fix 1/3: eliminada ejecución automática de requireAuth()
-//        Cada página llama explícitamente a requireAuth()
-//        AUTH_CHECK_SKIP_AUTO para set_session.php
-//      - Fix 5: añadido session.use_only_cookies
-//        Evita session fixation por URL (?PHPSESSID=)
-//      - Fix 6: getCurrentUser() comprobado en requireAuth()
-//        Si devuelve null se destruye la sesión
-//      - Fix 10: session_set_cookie_params() solo si
-//        PHP_SESSION_NONE — no reconfigura sesión activa
+//        Fix 5: session.use_only_cookies
+//        Fix 6: getCurrentUser() comprobado en requireAuth()
+//        Fix 10: session_set_cookie_params() solo si PHP_SESSION_NONE
+// v1.4 - Fix tipo: isAuthenticated() cambiado a void
+//        nunca retorna false, siempre redirige si falla
+//      - Añadido regenerateSessionNow() para regenerar
+//        inmediatamente en cambio de rol o privilegios
+//        Elimina ventana de 5 minutos de session fixation
 // ============================================================
 
 // -------------------------------------------------------
 // isHttpsRequest()
 // Detecta HTTPS sin depender de HTTP_HOST
+// NOTA: APP_BASE_URL asume raíz del dominio
+// En Railway siempre estamos en raíz, no hay subdirectorio
 // -------------------------------------------------------
 function isHttpsRequest(): bool
 {
@@ -47,27 +49,25 @@ function isHttpsRequest(): bool
 
 // -------------------------------------------------------
 // startSecureSession()
-// Fix 10: session_set_cookie_params() y ini_set()
-// solo si no hay sesión activa (PHP_SESSION_NONE)
+// session_set_cookie_params() e ini_set() solo si
+// PHP_SESSION_NONE — no reconfigura sesión activa
 // -------------------------------------------------------
 function startSecureSession(): void
 {
     if (session_status() !== PHP_SESSION_NONE) {
-        return; // Sesión ya iniciada — no reconfigurar
+        return;
     }
 
     $isHttps = isHttpsRequest();
 
-    // Fix 5: use_only_cookies evita session fixation por URL
     ini_set('session.use_only_cookies', '1');
     ini_set('session.use_strict_mode',  '1');
 
-    // Fix 10: configurar cookie solo antes de session_start()
     session_set_cookie_params([
         'lifetime' => 0,
         'path'     => '/',
         'domain'   => '',
-        'secure'   => $isHttps, // Solo HTTPS en producción, HTTP en local
+        'secure'   => $isHttps,
         'httponly' => true,
         'samesite' => 'Strict',
     ]);
@@ -78,6 +78,9 @@ function startSecureSession(): void
 // -------------------------------------------------------
 // generateSessionFingerprint()
 // Hash del User-Agent del cliente
+// NOTA: fingerprint basado solo en User-Agent
+// Añadir token de sessionStorage aumentaría seguridad
+// pero añade complejidad innecesaria para este proyecto
 // -------------------------------------------------------
 function generateSessionFingerprint(): string
 {
@@ -86,8 +89,22 @@ function generateSessionFingerprint(): string
 }
 
 // -------------------------------------------------------
+// regenerateSessionNow()
+// v1.4: regenera el ID de sesión inmediatamente
+// Llamar cuando cambia el rol o los privilegios del usuario
+// Elimina la ventana de 5 minutos de session fixation
+// que existía con la regeneración periódica sola
+// -------------------------------------------------------
+function regenerateSessionNow(): void
+{
+    session_regenerate_id(true);
+    $_SESSION['last_regeneration'] = time();
+}
+
+// -------------------------------------------------------
 // regenerateSessionIfNeeded()
 // Regenera el ID de sesión cada 5 minutos
+// Para cambios de rol usar regenerateSessionNow()
 // -------------------------------------------------------
 function regenerateSessionIfNeeded(): void
 {
@@ -106,8 +123,7 @@ function regenerateSessionIfNeeded(): void
 
 // -------------------------------------------------------
 // redirectToLogin()
-// Redirige al login con motivo — usa APP_BASE_URL de config
-// Si APP_BASE_URL está vacía usa ruta relativa (funciona en Railway)
+// Redirige al login con motivo específico
 // -------------------------------------------------------
 function redirectToLogin(string $reason = 'session_missing'): void
 {
@@ -118,9 +134,8 @@ function redirectToLogin(string $reason = 'session_missing'): void
 
 // -------------------------------------------------------
 // destroySession()
-// Destruye sesión completa y redirige al login
-// NOTA: siempre termina el script via redirectToLogin()
-// Si necesitas destruir sin redirigir usa clearSessionData()
+// Destruye sesión y redirige — siempre termina el script
+// Para destruir sin redirigir usar clearSessionData()
 // -------------------------------------------------------
 function destroySession(string $reason = 'session_missing'): void
 {
@@ -132,8 +147,6 @@ function destroySession(string $reason = 'session_missing'): void
 // -------------------------------------------------------
 // clearSessionData()
 // Destruye la sesión sin redirigir
-// Útil para logout via API o cuando se necesita destruir
-// la sesión sin terminar el script
 // -------------------------------------------------------
 function clearSessionData(): void
 {
@@ -172,7 +185,6 @@ function logAccesoFallido(string $reason = 'session_missing', ?string $username 
 // -------------------------------------------------------
 // getCurrentUser()
 // Devuelve datos del usuario actual o null si no hay sesión
-// null evita tratar a un invitado como usuario válido
 // -------------------------------------------------------
 function getCurrentUser(): ?array
 {
@@ -189,13 +201,11 @@ function getCurrentUser(): ?array
 
 // -------------------------------------------------------
 // isAuthenticated()
-// Verifica sesión completa:
-// 1. Existencia de sesión
-// 2. Timeout de inactividad (2 horas)
-// 3. Fingerprint del cliente
-// 4. Regeneración periódica del ID
+// v1.4: cambiado a void — nunca retorna false
+// Si algo falla redirige directamente, nunca retorna false
+// Verifica: existencia, timeout, fingerprint, regeneración
 // -------------------------------------------------------
-function isAuthenticated(): bool
+function isAuthenticated(): void
 {
     // 1. Existencia de sesión
     if (!isset($_SESSION['usuario'], $_SESSION['rol'])) {
@@ -222,27 +232,22 @@ function isAuthenticated(): bool
 
     // 4. Regeneración periódica
     regenerateSessionIfNeeded();
-
-    return true;
 }
 
 // -------------------------------------------------------
 // requireAuth()
-// Fix 6: comprueba getCurrentUser() después de isAuthenticated()
-// Si devuelve null (edge case) destruye la sesión
+// Punto de entrada para páginas protegidas
 // Acepta roles permitidos opcionales
 // -------------------------------------------------------
 function requireAuth(array $allowedRoles = []): array
 {
     isAuthenticated();
 
-    // Fix 6: comprobación explícita de getCurrentUser()
     $user = getCurrentUser();
     if ($user === null) {
         destroySession('session_missing');
     }
 
-    // Verificar rol si se especifican roles permitidos
     if (!empty($allowedRoles) && !in_array($user['rol'], $allowedRoles, true)) {
         logAccesoFallido('unauthorized_role', $user['usuario']);
         redirectToLogin('unauthorized_role');
@@ -252,10 +257,7 @@ function requireAuth(array $allowedRoles = []): array
 }
 
 // ============================================================
-// INICIO — arrancar sesión segura
-// Fix 1/3: NO se ejecuta requireAuth() automáticamente
-// Cada página protegida llama explícitamente a requireAuth()
-// set_session.php define AUTH_CHECK_SKIP_AUTO antes de incluir
+// INICIO
 // ============================================================
 startSecureSession();
 
@@ -263,9 +265,8 @@ if (!defined('APP_BASE_URL')) {
     define('APP_BASE_URL', '');
 }
 
-// Fix 1: solo ejecutar requireAuth() si no se ha definido
-// AUTH_CHECK_SKIP_AUTO — permite incluir este archivo en
-// set_session.php sin forzar autenticación
+// No ejecutar requireAuth() automáticamente
+// set_session.php define AUTH_CHECK_SKIP_AUTO para saltarlo
 if (!defined('AUTH_CHECK_SKIP_AUTO')) {
     $current_user = requireAuth();
 }
