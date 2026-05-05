@@ -660,10 +660,10 @@ select { cursor: pointer; appearance: none;
 /* ============================================================
    ESTADO BADGES (competiciones)
    ============================================================ */
-.estado-abierta  { @extend .badge-success; }
-.estado-en_curso { @extend .badge-warning; }
-.estado-cerrada  { @extend .badge-default; }
-.estado-sin_fecha{ @extend .badge-info; }
+.estado-abierta  { background: rgba(46,204,113,0.15); color: #2ecc71; }
+.estado-en_curso { background: rgba(243,156,18,0.15); color: #f39c12; }
+.estado-cerrada  { background: #1e1e1e; color: #999999; }
+.estado-sin_fecha { background: rgba(52,152,219,0.15); color: #3498db; }
 
 /* ============================================================
    EMPTY STATE
