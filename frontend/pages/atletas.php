@@ -1,386 +1,275 @@
-
+<?php
 // ============================================================
-// js/atletas.js — Gestión de atletas e inscripciones
+// pages/atletas.php — Gestión de atletas e inscripciones
 // ============================================================
 // HISTORIAL DE CAMBIOS
-// v1.0 - Listar atletas, inscribir, historial,
-//        desactivar/reactivar, paginación
-//        Mismas mejoras que competiciones.js:
-//        const, DOM object, renderTabla separado,
-//        toast, delegación de eventos, errores de red
+// v1.0 - Estructura básica sin contenido
+// v1.1 - Tabla de atletas con paginación
+//        Modal inscribir atleta en evento
+//        Modal ver historial del atleta
+//        Filtro activos/inactivos
+//        Botones desactivar/reactivar
 // ============================================================
 
-const LIMITE_POR_PAGINA = 10;
-let paginaActual = 1;
+require_once __DIR__ . '/../includes/auth_check.php';
 
-const DOM = {
-    tablaBody:      () => document.getElementById('tabla-body'),
-    paginacion:     () => document.getElementById('paginacion'),
-    filtroActivo:   () => document.getElementById('filtro-activo'),
-    btnInscribir:   () => document.getElementById('btn-inscribir'),
-    toast:          () => document.getElementById('toast'),
+$current_user = requireAuth(['admin', 'organizador']);
 
-    // Modal inscribir
-    modalInscribir: () => document.getElementById('modal-inscribir'),
-    closeInscribir: () => document.getElementById('close-inscribir'),
-    errorInscribir: () => document.getElementById('error-inscribir'),
-    btnCancelar:    () => document.getElementById('btn-cancelar-inscribir'),
-    btnGuardar:     () => document.getElementById('btn-guardar-inscribir'),
-    btnText:        () => document.getElementById('btn-inscribir-text'),
-    btnSpinner:     () => document.getElementById('btn-inscribir-spinner'),
-    campoNombre:    () => document.getElementById('campo-nombre'),
-    campoApellido:  () => document.getElementById('campo-apellido'),
-    campoFechaNac:  () => document.getElementById('campo-fecha-nac'),
-    campoNac:       () => document.getElementById('campo-nac'),
-    campoComp:      () => document.getElementById('campo-competicion'),
-    campoCat:       () => document.getElementById('campo-categoria'),
-    campoDorsal:    () => document.getElementById('campo-dorsal'),
-    campoPeso:      () => document.getElementById('campo-peso'),
-    campoEstatura:  () => document.getElementById('campo-estatura'),
-
-    // Modal historial
-    modalHistorial: () => document.getElementById('modal-historial'),
-    historialTitulo:() => document.getElementById('historial-titulo'),
-    historialBody:  () => document.getElementById('historial-body'),
-    closeHistorial: () => document.getElementById('close-historial'),
-    btnCerrarHist:  () => document.getElementById('btn-cerrar-historial'),
-};
-
-document.addEventListener('DOMContentLoaded', async () => {
-    if (!sessionStorage.getItem('token') && window.__JWT) {
-        sessionStorage.setItem('token', window.__JWT);
+$usuario = htmlspecialchars($current_user['usuario'], ENT_QUOTES, 'UTF-8');
+$rol     = htmlspecialchars($current_user['rol'],     ENT_QUOTES, 'UTF-8');
+$token   = $current_user['token'];
+?>
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Atletas — Classic Physique</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="stylesheet" href="/css/styles.css">
+  <script>
+    window.__JWT = <?= json_encode($token) ?>;
+  </script>
+  <style>
+    .toast {
+      position: fixed; bottom: 24px; right: 24px;
+      padding: 14px 20px; border-radius: var(--radius);
+      font-size: 0.875rem; font-weight: 500;
+      z-index: 3000; transform: translateY(80px); opacity: 0;
+      transition: all 0.3s ease; max-width: 340px;
     }
+    .toast.show { transform: translateY(0); opacity: 1; }
+    .toast-success { background: var(--success); color: #000; }
+    .toast-error   { background: var(--error);   color: #fff; }
+  </style>
+</head>
+<body>
+<div class="page-wrapper">
 
-    if (!AuthAPI.isLoggedIn()) {
-        window.location.href = '/pages/login.php?reason=session_missing';
-        return;
-    }
+  <!-- SIDEBAR -->
+  <aside class="sidebar">
+    <div class="sidebar-logo">
+      <div class="logo-text">Classic Physique</div>
+      <div class="logo-sub">Competition Mgmt</div>
+    </div>
+    <nav class="sidebar-nav">
+      <div class="nav-section-title">Principal</div>
+      <a href="/pages/dashboard.php" class="nav-item">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/>
+          <rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/>
+        </svg>
+        Dashboard
+      </a>
+      <div class="nav-section-title">Gestion</div>
+      <a href="/pages/competiciones.php" class="nav-item">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M8 21h8M12 17v4M17 3H7L5 9c0 3.87 3.13 7 7 7s7-3.13 7-7l-2-6z"/>
+        </svg>
+        Competiciones
+      </a>
+      <a href="/pages/atletas.php" class="nav-item active">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+          <circle cx="9" cy="7" r="4"/>
+        </svg>
+        Atletas
+      </a>
+      <a href="/pages/puntuaciones.php" class="nav-item">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
+        </svg>
+        Puntuaciones
+      </a>
+      <a href="/pages/resultados.php" class="nav-item">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="8" r="6"/>
+          <path d="M15.477 12.89L17 22l-5-3-5 3 1.523-9.11"/>
+        </svg>
+        Resultados
+      </a>
+    </nav>
+    <div class="sidebar-footer">
+      <div class="user-info">
+        <div class="user-avatar"><?= strtoupper(substr($usuario, 0, 1)) ?></div>
+        <div>
+          <div class="user-name"><?= $usuario ?></div>
+          <div class="user-role"><?= $rol ?></div>
+        </div>
+      </div>
+      <a href="/pages/logout.php" class="btn-logout">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+          <polyline points="16 17 21 12 16 7"/>
+          <line x1="21" y1="12" x2="9" y2="12"/>
+        </svg>
+        Cerrar sesion
+      </a>
+    </div>
+  </aside>
 
-    cargarAtletas();
-    cargarSelectores();
+  <!-- CONTENIDO -->
+  <main class="main-content">
+    <div class="page-header">
+      <div>
+        <h1 class="page-title">Atletas</h1>
+        <p class="page-subtitle">Gestiona atletas e inscripciones</p>
+      </div>
+      <button class="btn btn-primary" id="btn-inscribir">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+        </svg>
+        Inscribir Atleta
+      </button>
+    </div>
 
-    DOM.filtroActivo().addEventListener('change', () => {
-        paginaActual = 1;
-        cargarAtletas();
-    });
+    <div class="page-body">
 
-    DOM.btnInscribir().addEventListener('click', () => abrirModalInscribir());
-    DOM.closeInscribir().addEventListener('click', cerrarModalInscribir);
-    DOM.btnCancelar().addEventListener('click', cerrarModalInscribir);
-    DOM.btnGuardar().addEventListener('click', inscribir);
-    DOM.closeHistorial().addEventListener('click', cerrarModalHistorial);
-    DOM.btnCerrarHist().addEventListener('click', cerrarModalHistorial);
+      <!-- Filtros -->
+      <div style="display:flex; gap:12px; margin-bottom:24px; flex-wrap:wrap;">
+        <select id="filtro-activo" style="width:auto; padding:8px 36px 8px 12px;">
+          <option value="1">Activos</option>
+          <option value="0">Inactivos</option>
+        </select>
+      </div>
 
-    DOM.modalInscribir().addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') { e.preventDefault(); inscribir(); }
-        if (e.key === 'Escape') cerrarModalInscribir();
-    });
+      <!-- Tabla -->
+      <div class="card">
+        <div class="table-wrapper" style="border:none; border-radius:0">
+          <table>
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Nombre</th>
+                <th>Fecha Nac.</th>
+                <th>Nacionalidad</th>
+                <th>Estado</th>
+                <th>Acciones</th>
+              </tr>
+            </thead>
+            <tbody id="tabla-body">
+              <tr>
+                <td colspan="6" style="text-align:center; color:var(--text-muted); padding:32px">
+                  Cargando...
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div style="padding:16px 24px; border-top:1px solid var(--border)">
+          <div id="paginacion" class="pagination"></div>
+        </div>
+      </div>
 
-    DOM.modalInscribir().addEventListener('click', (e) => {
-        if (e.target === DOM.modalInscribir()) cerrarModalInscribir();
-    });
+    </div>
+  </main>
 
-    DOM.modalHistorial().addEventListener('click', (e) => {
-        if (e.target === DOM.modalHistorial()) cerrarModalHistorial();
-    });
+</div>
 
-    // Delegación de eventos en tabla
-    DOM.tablaBody().addEventListener('click', (e) => {
-        const btnHistorial  = e.target.closest('[data-action="historial"]');
-        const btnDesactivar = e.target.closest('[data-action="desactivar"]');
-        const btnReactivar  = e.target.closest('[data-action="reactivar"]');
+<!-- TOAST -->
+<div class="toast" id="toast"></div>
 
-        if (btnHistorial)  verHistorial(btnHistorial.dataset.id, btnHistorial.dataset.nombre);
-        if (btnDesactivar) desactivarAtleta(btnDesactivar.dataset.id, btnDesactivar.dataset.nombre);
-        if (btnReactivar)  reactivarAtleta(btnReactivar.dataset.id, btnReactivar.dataset.nombre);
-    });
-});
+<!-- MODAL INSCRIBIR -->
+<div class="modal-overlay" id="modal-inscribir">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title">Inscribir Atleta</span>
+      <button class="modal-close" id="close-inscribir">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div id="error-inscribir" class="alert alert-error" style="display:none"></div>
+      <div class="form-row">
+        <div class="form-group">
+          <label for="campo-nombre">Nombre *</label>
+          <input type="text" id="campo-nombre" maxlength="100">
+        </div>
+        <div class="form-group">
+          <label for="campo-apellido">Apellido *</label>
+          <input type="text" id="campo-apellido" maxlength="100">
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label for="campo-fecha-nac">Fecha nacimiento *</label>
+          <input type="date" id="campo-fecha-nac">
+        </div>
+        <div class="form-group">
+          <label for="campo-nac">Nacionalidad (ISO)</label>
+          <input type="text" id="campo-nac" placeholder="ESP" maxlength="3" style="text-transform:uppercase">
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label for="campo-competicion">Competicion *</label>
+          <select id="campo-competicion">
+            <option value="">Selecciona...</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="campo-categoria">Categoria</label>
+          <select id="campo-categoria">
+            <option value="">Sin categoria</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label for="campo-dorsal">Dorsal</label>
+          <input type="number" id="campo-dorsal" min="1">
+        </div>
+        <div class="form-group">
+          <label for="campo-peso">Peso (kg)</label>
+          <input type="number" id="campo-peso" step="0.01" min="0">
+        </div>
+        <div class="form-group">
+          <label for="campo-estatura">Estatura (m)</label>
+          <input type="number" id="campo-estatura" step="0.01" min="0">
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" id="btn-cancelar-inscribir">Cancelar</button>
+      <button class="btn btn-primary" id="btn-guardar-inscribir">
+        <span id="btn-inscribir-text">Inscribir</span>
+        <span id="btn-inscribir-spinner" class="spinner" style="display:none"></span>
+      </button>
+    </div>
+  </div>
+</div>
 
-// -------------------------------------------------------
-// cargarAtletas()
-// -------------------------------------------------------
-async function cargarAtletas() {
-    DOM.tablaBody().innerHTML = `
-        <tr><td colspan="6" style="text-align:center; color:var(--text-muted); padding:32px">
-            Cargando...
-        </td></tr>`;
-
-    const activo = DOM.filtroActivo().value;
-
-    try {
-        const data    = await AtletasAPI.getAll({ page: paginaActual, limit: LIMITE_POR_PAGINA, activo });
-        const atletas = data.data || [];
-        const pag     = data.pagination || {};
-
-        renderTabla(atletas, activo);
-        renderPaginacion(pag);
-
-    } catch (err) {
-        const msg = err.message.includes('fetch') ? 'Error de conexion con el servidor' : err.message;
-        DOM.tablaBody().innerHTML = `
-            <tr><td colspan="6" style="text-align:center; color:var(--error); padding:32px">
-                ${escapeHtml(msg)}
-            </td></tr>`;
-    }
-}
-
-// -------------------------------------------------------
-// renderTabla()
-// -------------------------------------------------------
-function renderTabla(atletas, activo) {
-    if (atletas.length === 0) {
-        DOM.tablaBody().innerHTML = `
-            <tr><td colspan="6" style="text-align:center; color:var(--text-muted); padding:32px">
-                No hay atletas
-            </td></tr>`;
-        return;
-    }
-
-    DOM.tablaBody().innerHTML = atletas.map(a => `
-        <tr>
-          <td style="color:var(--text-muted)">#${a.id_atleta}</td>
-          <td><strong>${escapeHtml(a.nombre + ' ' + a.apellido)}</strong></td>
-          <td>${formatFecha(a.fecha_nacimiento)}</td>
-          <td>${escapeHtml(a.nacionalidad || '—')}</td>
-          <td>
-            <span class="badge ${a.activo == 1 ? 'badge-success' : 'badge-error'}">
-              ${a.activo == 1 ? 'Activo' : 'Inactivo'}
-            </span>
-          </td>
-          <td>
-            <div style="display:flex; gap:8px; flex-wrap:wrap">
-              <button class="btn btn-secondary btn-sm"
-                data-action="historial"
-                data-id="${a.id_atleta}"
-                data-nombre="${escapeHtml(a.nombre + ' ' + a.apellido)}">
-                Historial
-              </button>
-              ${a.activo == 1
-                ? `<button class="btn btn-danger btn-sm"
-                    data-action="desactivar"
-                    data-id="${a.id_atleta}"
-                    data-nombre="${escapeHtml(a.nombre + ' ' + a.apellido)}">
-                    Desactivar
-                   </button>`
-                : `<button class="btn btn-secondary btn-sm"
-                    data-action="reactivar"
-                    data-id="${a.id_atleta}"
-                    data-nombre="${escapeHtml(a.nombre + ' ' + a.apellido)}">
-                    Reactivar
-                   </button>`
-              }
-            </div>
-          </td>
-        </tr>
-    `).join('');
-}
-
-// -------------------------------------------------------
-// renderPaginacion()
-// -------------------------------------------------------
-function renderPaginacion(pag) {
-    if (!pag.total_pages || pag.total_pages <= 1) {
-        DOM.paginacion().innerHTML = '';
-        return;
-    }
-    let html = `<button class="page-btn" ${pag.page <= 1 ? 'disabled' : ''} onclick="irPagina(${pag.page - 1})">&#8592;</button>`;
-    for (let i = 1; i <= pag.total_pages; i++) {
-        html += `<button class="page-btn ${i === pag.page ? 'active' : ''}" onclick="irPagina(${i})">${i}</button>`;
-    }
-    html += `<button class="page-btn" ${pag.page >= pag.total_pages ? 'disabled' : ''} onclick="irPagina(${pag.page + 1})">&#8594;</button>`;
-    DOM.paginacion().innerHTML = html;
-}
-
-function irPagina(n) { paginaActual = n; cargarAtletas(); }
-
-// -------------------------------------------------------
-// cargarSelectores() — competiciones y categorías
-// -------------------------------------------------------
-async function cargarSelectores() {
-    try {
-        const [compsData, catsData] = await Promise.all([
-            CompeticionesAPI.getAll({ limit: 100 }),
-            fetch('/api/categorias.php', {
-                headers: { 'Authorization': `Bearer ${sessionStorage.getItem('token')}` }
-            }).then(r => r.json()).catch(() => ({ data: [] }))
-        ]);
-
-        const comps = (compsData.data || []).filter(c => c.estado === 'abierta' || c.estado === 'en_curso');
-        DOM.campoComp().innerHTML = '<option value="">Selecciona...</option>' +
-            comps.map(c => `<option value="${c.id_competicion}">${escapeHtml(c.nombre_evento)}</option>`).join('');
-
-        const cats = catsData.data || catsData || [];
-        DOM.campoCat().innerHTML = '<option value="">Sin categoria</option>' +
-            cats.map(c => `<option value="${c.id_categoria}">${escapeHtml(c.nombre)}</option>`).join('');
-
-    } catch (err) {
-        console.error('Error cargando selectores:', err);
-    }
-}
-
-// -------------------------------------------------------
-// Modal inscribir
-// -------------------------------------------------------
-function abrirModalInscribir() {
-    DOM.campoNombre().value   = '';
-    DOM.campoApellido().value = '';
-    DOM.campoFechaNac().value = '';
-    DOM.campoNac().value      = '';
-    DOM.campoComp().value     = '';
-    DOM.campoCat().value      = '';
-    DOM.campoDorsal().value   = '';
-    DOM.campoPeso().value     = '';
-    DOM.campoEstatura().value = '';
-    DOM.errorInscribir().style.display = 'none';
-    DOM.modalInscribir().classList.add('open');
-    DOM.campoNombre().focus();
-}
-
-function cerrarModalInscribir() {
-    DOM.modalInscribir().classList.remove('open');
-}
-
-async function inscribir() {
-    const errEl    = DOM.errorInscribir();
-    const nombre   = DOM.campoNombre().value.trim();
-    const apellido = DOM.campoApellido().value.trim();
-    const fechaNac = DOM.campoFechaNac().value;
-    const nac      = DOM.campoNac().value.trim().toUpperCase();
-    const compId   = DOM.campoComp().value;
-    const catId    = DOM.campoCat().value;
-    const dorsal   = DOM.campoDorsal().value;
-    const peso     = DOM.campoPeso().value;
-    const estatura = DOM.campoEstatura().value;
-
-    const errors = [];
-    if (!nombre)   errors.push('Nombre es obligatorio');
-    if (!apellido) errors.push('Apellido es obligatorio');
-    if (!fechaNac) errors.push('Fecha de nacimiento es obligatoria');
-    if (!compId)   errors.push('Debes seleccionar una competicion');
-
-    if (errors.length > 0) {
-        errEl.innerHTML = errors.map(e => `<div>${e}</div>`).join('');
-        errEl.style.display = 'flex';
-        return;
-    }
-
-    setInscribiendo(true);
-    errEl.style.display = 'none';
-
-    try {
-        await AtletasAPI.inscribir({
-            nombre, apellido,
-            fecha_nacimiento:  fechaNac,
-            nacionalidad:      nac || null,
-            id_competicion:    parseInt(compId),
-            id_categoria:      catId    ? parseInt(catId)    : null,
-            numero_dorsal:     dorsal   ? parseInt(dorsal)   : null,
-            peso_registro:     peso     ? parseFloat(peso)   : null,
-            estatura_registro: estatura ? parseFloat(estatura) : null,
-        });
-
-        cerrarModalInscribir();
-        showToast('Atleta inscrito correctamente', 'success');
-        cargarAtletas();
-
-    } catch (err) {
-        const msg = err.message.includes('fetch') ? 'Error de conexion con el servidor' : err.message;
-        errEl.textContent = msg;
-        errEl.style.display = 'flex';
-        setInscribiendo(false);
-    }
-}
-
-function setInscribiendo(loading) {
-    DOM.btnGuardar().disabled = loading;
-    DOM.btnText().style.display    = loading ? 'none'        : 'inline';
-    DOM.btnSpinner().style.display = loading ? 'inline-block': 'none';
-}
-
-// -------------------------------------------------------
-// Historial
-// -------------------------------------------------------
-async function verHistorial(id, nombre) {
-    DOM.historialTitulo().textContent = `Historial — ${nombre}`;
-    DOM.historialBody().innerHTML = `<tr><td colspan="6" style="text-align:center; padding:32px; color:var(--text-muted)">Cargando...</td></tr>`;
-    DOM.modalHistorial().classList.add('open');
-
-    try {
-        const data     = await AtletasAPI.getHistorial(id);
-        const eventos  = data.data || [];
-
-        if (eventos.length === 0) {
-            DOM.historialBody().innerHTML = `<tr><td colspan="6" style="text-align:center; padding:32px; color:var(--text-muted)">Sin historial</td></tr>`;
-            return;
-        }
-
-        DOM.historialBody().innerHTML = eventos.map(e => `
+<!-- MODAL HISTORIAL -->
+<div class="modal-overlay" id="modal-historial">
+  <div class="modal" style="max-width:800px">
+    <div class="modal-header">
+      <span class="modal-title" id="historial-titulo">Historial</span>
+      <button class="modal-close" id="close-historial">&times;</button>
+    </div>
+    <div class="modal-body" style="padding:0">
+      <div class="table-wrapper" style="border:none">
+        <table>
+          <thead>
             <tr>
-              <td>${escapeHtml(e.nombre_evento)}</td>
-              <td>${e.fecha_evento ? formatFecha(e.fecha_evento) : '—'}</td>
-              <td>${escapeHtml(e.categoria || '—')}</td>
-              <td>${e.numero_dorsal ?? '—'}</td>
-              <td>${e.peso_registro ? e.peso_registro + ' kg' : '—'}</td>
-              <td>${e.ranking_final
-                ? `<span class="badge badge-success">#${e.ranking_final}</span>`
-                : '<span class="badge badge-default">Sin resultado</span>'}</td>
+              <th>Evento</th>
+              <th>Fecha</th>
+              <th>Categoria</th>
+              <th>Dorsal</th>
+              <th>Peso</th>
+              <th>Puesto</th>
             </tr>
-        `).join('');
+          </thead>
+          <tbody id="historial-body">
+            <tr><td colspan="6" style="text-align:center; padding:32px; color:var(--text-muted)">Cargando...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" id="btn-cerrar-historial">Cerrar</button>
+    </div>
+  </div>
+</div>
 
-    } catch (err) {
-        DOM.historialBody().innerHTML = `<tr><td colspan="6" style="text-align:center; color:var(--error); padding:32px">${escapeHtml(err.message)}</td></tr>`;
-    }
-}
-
-function cerrarModalHistorial() {
-    DOM.modalHistorial().classList.remove('open');
-}
-
-// -------------------------------------------------------
-// Desactivar / Reactivar
-// -------------------------------------------------------
-async function desactivarAtleta(id, nombre) {
-    if (!confirm(`Desactivar a "${nombre}"?\nNo podra inscribirse en nuevos eventos.`)) return;
-    try {
-        await AtletasAPI.desactivar(id);
-        showToast('Atleta desactivado', 'success');
-        cargarAtletas();
-    } catch (err) {
-        showToast(err.message.includes('fetch') ? 'Error de conexion' : err.message, 'error');
-    }
-}
-
-async function reactivarAtleta(id, nombre) {
-    if (!confirm(`Reactivar a "${nombre}"?`)) return;
-    try {
-        await AtletasAPI.reactivar(id);
-        showToast('Atleta reactivado', 'success');
-        cargarAtletas();
-    } catch (err) {
-        showToast(err.message.includes('fetch') ? 'Error de conexion' : err.message, 'error');
-    }
-}
-
-// -------------------------------------------------------
-// Toast
-// -------------------------------------------------------
-function showToast(msg, tipo = 'success') {
-    const toast = DOM.toast();
-    toast.textContent = msg;
-    toast.className   = `toast toast-${tipo} show`;
-    setTimeout(() => toast.classList.remove('show'), 3500);
-}
-
-// -------------------------------------------------------
-// Helpers
-// -------------------------------------------------------
-function escapeHtml(str) {
-    const div = document.createElement('div');
-    div.textContent = String(str);
-    return div.innerHTML;
-}
-
-function formatFecha(fecha) {
-    const d = new Date(fecha);
-    return d.toLocaleDateString('es-ES', { day: '2-digit', month: 'short', year: 'numeric' });
-}
+<script src="/js/api.js"></script>
+<script src="/js/atletas.js"></script>
+</body>
+</html>
