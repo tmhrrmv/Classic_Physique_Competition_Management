@@ -39,8 +39,8 @@ function startSecureSession(): void
     }
 
     // Cargar SessionHandler y ConexionDB
-    require_once __DIR__ . '/../../backend/clases/ConexionDB.php';
-    require_once __DIR__ . '/../../backend/clases/DbSessionHandler.php';
+    require_once dirname(__DIR__, 2) . '/backend/clases/ConexionDB.php';
+    require_once dirname(__DIR__, 2) . '/backend/clases/DbSessionHandler.php';
 
     // Registrar el handler de sesiones en MySQL
     $handler = new DbSessionHandler(ConexionDB::getInstancia()->getConexion());
@@ -194,8 +194,8 @@ if (!defined('APP_BASE_URL')) {
 }
 
 // Cargar config para ConexionDB
-require_once __DIR__ . '/../../backend/config.php';
-require_once __DIR__ . '/../../backend/helpers.php';
+require_once dirname(__DIR__, 2) . '/backend/config.php';
+require_once dirname(__DIR__, 2) . '/backend/helpers.php';
 
 startSecureSession();
 
