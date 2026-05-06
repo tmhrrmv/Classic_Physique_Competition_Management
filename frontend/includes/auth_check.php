@@ -5,17 +5,16 @@ declare(strict_types=1);
 // includes/auth_check.php — Gestión segura de sesiones PHP
 // ============================================================
 // HISTORIAL DE CAMBIOS
-// v1.0 - v1.4 - Ver versiones anteriores
-// v1.5 - Fix bucle redirección en Railway:
-//        isHttpsRequest() ahora comprueba X-Forwarded-Proto
-//        Railway usa proxy inverso — el servidor interno
-//        es HTTP aunque el cliente use HTTPS
-//        cookie_secure se activa correctamente
+// v1.0 - v1.5 - Ver versiones anteriores
+// v1.6 - Sesiones guardadas en MySQL via SessionHandler
+//        Soluciona problema multi-worker en Railway
+//        Login PHP puro sin JavaScript
+//        gc_maxlifetime 7200 (2 horas)
+//        Índice en last_access para limpieza eficiente
 // ============================================================
 
 function isHttpsRequest(): bool
 {
-    // Railway usa proxy — comprobar X-Forwarded-Proto
     if (!empty($_SERVER['HTTP_X_FORWARDED_PROTO']) &&
         $_SERVER['HTTP_X_FORWARDED_PROTO'] === 'https') {
         return true;
@@ -29,23 +28,31 @@ function isHttpsRequest(): bool
     return false;
 }
 
+// -------------------------------------------------------
+// startSecureSession()
+// v1.6: usa SessionHandler para guardar sesiones en MySQL
+// -------------------------------------------------------
 function startSecureSession(): void
 {
     if (session_status() !== PHP_SESSION_NONE) {
         return;
     }
 
-    // Asegurar directorio de sesiones compartido
-    $sessionPath = '/tmp/sessions';
-    if (!is_dir($sessionPath)) {
-        mkdir($sessionPath, 0700, true);
-    }
-    ini_set('session.save_path', $sessionPath);
+    // Cargar SessionHandler y ConexionDB
+    require_once __DIR__ . '/../../backend/clases/ConexionDB.php';
+    require_once __DIR__ . '/../../backend/clases/SessionHandler.php';
+
+    // Registrar el handler de sesiones en MySQL
+    $handler = new SessionHandler(ConexionDB::getInstancia()->getConexion());
+    session_set_save_handler($handler, true);
 
     $isHttps = isHttpsRequest();
 
-    ini_set('session.use_only_cookies', '1');
-    ini_set('session.use_strict_mode',  '1');
+    ini_set('session.use_only_cookies',  '1');
+    ini_set('session.use_strict_mode',   '1');
+    ini_set('session.gc_maxlifetime',    '7200'); // 2 horas
+    ini_set('session.gc_probability',    '1');
+    ini_set('session.gc_divisor',        '100');  // 1% de peticiones ejecuta gc
 
     session_set_cookie_params([
         'lifetime' => 0,
@@ -53,7 +60,7 @@ function startSecureSession(): void
         'domain'   => '',
         'secure'   => $isHttps,
         'httponly' => true,
-        'samesite' => 'Lax', // Cambiado de Strict a Lax para Railway
+        'samesite' => 'Lax',
     ]);
 
     session_start();
@@ -182,11 +189,15 @@ function requireAuth(array $allowedRoles = []): array
 // ============================================================
 // INICIO
 // ============================================================
-startSecureSession();
-
 if (!defined('APP_BASE_URL')) {
     define('APP_BASE_URL', '');
 }
+
+// Cargar config para ConexionDB
+require_once __DIR__ . '/../../backend/config.php';
+require_once __DIR__ . '/../../backend/helpers.php';
+
+startSecureSession();
 
 if (!defined('AUTH_CHECK_SKIP_AUTO')) {
     $current_user = requireAuth();
