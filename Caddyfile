@@ -4,26 +4,6 @@
 }
 
 :{$PORT:80} {
-	# Static assets served directly from frontend/ with correct MIME types
-	handle /css/* {
-		root * /app/frontend
-		file_server
-	}
-
-	handle /js/* {
-		root * /app/frontend
-		file_server
-	}
-
-	handle /assets/* {
-		root * /app/frontend
-		file_server
-	}
-
-	# All other requests go through the PHP router (index.php)
-	handle {
-		root * /app
-		try_files {path} /index.php
-		php_server
-	}
+	root * /app
+	php_server
 }
