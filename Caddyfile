@@ -1,5 +1,8 @@
 {
-    frankenphp
+    frankenphp {
+        php_ini extension=pdo_mysql
+        php_ini extension=pdo
+    }
     order php_server before file_server
 }
 
