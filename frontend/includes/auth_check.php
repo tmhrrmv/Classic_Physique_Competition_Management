@@ -40,10 +40,10 @@ function startSecureSession(): void
 
     // Cargar SessionHandler y ConexionDB
     require_once __DIR__ . '/../../backend/clases/ConexionDB.php';
-    require_once __DIR__ . '/../../backend/clases/SessionHandler.php';
+    require_once __DIR__ . '/../../backend/clases/DbSessionHandler.php';
 
     // Registrar el handler de sesiones en MySQL
-    $handler = new SessionHandler(ConexionDB::getInstancia()->getConexion());
+    $handler = new DbSessionHandler(ConexionDB::getInstancia()->getConexion());
     session_set_save_handler($handler, true);
 
     $isHttps = isHttpsRequest();
