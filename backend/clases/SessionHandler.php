@@ -2,7 +2,7 @@
 declare(strict_types=1);
 
 // ============================================================
-// clases/SessionHandler.php — Manejador de sesiones en MySQL
+// clases/DbSessionHandler.php — Manejador de sesiones en MySQL
 // ============================================================
 // HISTORIAL DE CAMBIOS
 // v1.0 - Implementación SessionHandlerInterface
@@ -11,7 +11,7 @@ declare(strict_types=1);
 //        gc() limpia sesiones expiradas automáticamente
 // ============================================================
 
-class SessionHandler implements SessionHandlerInterface
+class DbSessionHandler implements SessionHandlerInterface
 {
     private PDO $pdo;
 
