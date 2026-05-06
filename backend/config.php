@@ -80,18 +80,23 @@ if (!preg_match('/^[a-zA-Z0-9\-]{1,64}$/', $request_id)) {
 }
 define('REQUEST_ID', $request_id);
 
-// Cabeceras globales
-header('Content-Type: application/json; charset=utf-8');
+// Cabecera de trazabilidad para todas las peticiones
 header('X-Request-ID: ' . REQUEST_ID);
 
-$allowed_origin = getenv('ALLOWED_ORIGIN') ?: (APP_DEBUG ? '*' : '');
-if ($allowed_origin !== '') {
-    header('Access-Control-Allow-Origin: '     . $allowed_origin);
-    header('Access-Control-Allow-Methods: GET, POST, PUT, PATCH, DELETE, OPTIONS');
-    header('Access-Control-Allow-Headers: Content-Type, Authorization, X-Request-ID');
-}
+// Headers JSON y CORS sólo para endpoints de la API
+$isApiRequest = (strpos($_SERVER['REQUEST_URI'] ?? '', '/api/') !== false);
+if ($isApiRequest) {
+    header('Content-Type: application/json; charset=utf-8');
 
-if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
-    http_response_code(204);
-    exit;
+    $allowed_origin = getenv('ALLOWED_ORIGIN') ?: (APP_DEBUG ? '*' : '');
+    if ($allowed_origin !== '') {
+        header('Access-Control-Allow-Origin: '     . $allowed_origin);
+        header('Access-Control-Allow-Methods: GET, POST, PUT, PATCH, DELETE, OPTIONS');
+        header('Access-Control-Allow-Headers: Content-Type, Authorization, X-Request-ID');
+    }
+
+    if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
+        http_response_code(204);
+        exit;
+    }
 }

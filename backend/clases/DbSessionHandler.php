@@ -20,9 +20,18 @@ class DbSessionHandler implements SessionHandlerInterface
         $this->pdo = $pdo;
     }
 
-    // Abre la sesión — no necesitamos hacer nada aquí
+    // Crea la tabla sesiones si no existe y abre la sesión
     public function open(string $path, string $name): bool
     {
+        $this->pdo->exec(
+            "CREATE TABLE IF NOT EXISTS sesiones (
+                id          VARCHAR(128)  NOT NULL,
+                data        MEDIUMTEXT    NOT NULL DEFAULT '',
+                last_access DATETIME      NOT NULL,
+                PRIMARY KEY (id),
+                INDEX idx_sesiones_last_access (last_access)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+        );
         return true;
     }
 
