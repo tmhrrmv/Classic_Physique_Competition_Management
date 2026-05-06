@@ -3,7 +3,7 @@
 	order php_server before file_server
 }
 
-:{$PORT:80} {
+:8080 {
 	root * /app
 	php_server
 }
