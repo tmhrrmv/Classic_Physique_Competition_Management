@@ -16,20 +16,18 @@
 --        sp_calcular_resultados: bloquea 'abierta' y 'sin_fecha'
 -- v1.5 - Eliminados inserts de prueba del schema
 --        Solo se insertan categorias, jueces y usuarios reales
+-- v1.6 - Adaptado para Railway (usa BD 'railway' existente)
+--        Añadida tabla sesiones para SessionHandler PHP
+--        Sesiones en MySQL para entornos multi-worker
 -- ============================================================
 
-DROP DATABASE IF EXISTS gestion_competiciones;
-CREATE DATABASE gestion_competiciones
-  CHARACTER SET utf8mb4
-  COLLATE utf8mb4_spanish_ci;
-
-USE gestion_competiciones;
+USE railway;
 
 -- ============================================================
 -- TABLAS
 -- ============================================================
 
-CREATE TABLE categoria (
+CREATE TABLE IF NOT EXISTS categoria (
   id_categoria          INT           NOT NULL AUTO_INCREMENT,
   nombre                VARCHAR(100)  NOT NULL,
   altura_min            DECIMAL(5,2)  DEFAULT NULL,
@@ -39,18 +37,18 @@ CREATE TABLE categoria (
   edad_max              INT           DEFAULT NULL,
   PRIMARY KEY (id_categoria),
   UNIQUE KEY uq_categoria_nombre (nombre)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_spanish_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE TABLE competicion (
+CREATE TABLE IF NOT EXISTS competicion (
   id_competicion INT          NOT NULL AUTO_INCREMENT,
   nombre_evento  VARCHAR(200) NOT NULL,
   fecha          DATE         DEFAULT NULL,
   lugar          VARCHAR(200) DEFAULT NULL,
   PRIMARY KEY (id_competicion),
   UNIQUE KEY uq_competicion (nombre_evento, fecha)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_spanish_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE TABLE atleta (
+CREATE TABLE IF NOT EXISTS atleta (
   id_atleta          INT          NOT NULL AUTO_INCREMENT,
   nombre             VARCHAR(100) NOT NULL,
   apellido           VARCHAR(100) NOT NULL,
@@ -61,9 +59,9 @@ CREATE TABLE atleta (
   PRIMARY KEY (id_atleta),
   UNIQUE KEY uq_atleta (nombre, apellido, fecha_nacimiento),
   CONSTRAINT chk_nacionalidad CHECK (nacionalidad REGEXP '^[A-Z]{3}$')
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_spanish_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE TABLE juez (
+CREATE TABLE IF NOT EXISTS juez (
   id_juez            INT          NOT NULL AUTO_INCREMENT,
   nombre             VARCHAR(200) NOT NULL,
   licencia           VARCHAR(50)  NOT NULL,
@@ -71,9 +69,9 @@ CREATE TABLE juez (
   fecha_modificacion DATETIME     DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (id_juez),
   UNIQUE KEY uq_juez_licencia (licencia)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_spanish_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE TABLE inscripcion (
+CREATE TABLE IF NOT EXISTS inscripcion (
   id_inscripcion    INT          NOT NULL AUTO_INCREMENT,
   id_atleta         INT          NOT NULL,
   id_competicion    INT          NOT NULL,
@@ -90,9 +88,9 @@ CREATE TABLE inscripcion (
   CONSTRAINT fk_insc_atleta      FOREIGN KEY (id_atleta)      REFERENCES atleta(id_atleta)           ON DELETE CASCADE,
   CONSTRAINT fk_insc_competicion FOREIGN KEY (id_competicion) REFERENCES competicion(id_competicion) ON DELETE CASCADE,
   CONSTRAINT fk_insc_categoria   FOREIGN KEY (id_categoria)   REFERENCES categoria(id_categoria)     ON DELETE SET NULL
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_spanish_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE TABLE puntuacion (
+CREATE TABLE IF NOT EXISTS puntuacion (
   id_puntuacion    INT NOT NULL AUTO_INCREMENT,
   id_inscripcion   INT NOT NULL,
   id_juez          INT NOT NULL,
@@ -103,9 +101,9 @@ CREATE TABLE puntuacion (
     CHECK (ranking_otorgado IS NULL OR ranking_otorgado >= 1),
   CONSTRAINT fk_punt_inscripcion FOREIGN KEY (id_inscripcion) REFERENCES inscripcion(id_inscripcion) ON DELETE CASCADE,
   CONSTRAINT fk_punt_juez        FOREIGN KEY (id_juez)        REFERENCES juez(id_juez)               ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_spanish_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE TABLE resultado_final (
+CREATE TABLE IF NOT EXISTS resultado_final (
   id_resultado   INT           NOT NULL AUTO_INCREMENT,
   id_inscripcion INT           NOT NULL,
   id_competicion INT           NOT NULL,
@@ -121,9 +119,9 @@ CREATE TABLE resultado_final (
   CONSTRAINT fk_res_inscripcion FOREIGN KEY (id_inscripcion) REFERENCES inscripcion(id_inscripcion) ON DELETE CASCADE,
   CONSTRAINT fk_res_competicion FOREIGN KEY (id_competicion) REFERENCES competicion(id_competicion) ON DELETE CASCADE,
   CONSTRAINT fk_res_categoria   FOREIGN KEY (id_categoria)   REFERENCES categoria(id_categoria)     ON DELETE SET NULL
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_spanish_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE TABLE usuarios (
+CREATE TABLE IF NOT EXISTS usuarios (
   id_usuario        INT          NOT NULL AUTO_INCREMENT,
   username          VARCHAR(50)  NOT NULL,
   password_hash     VARCHAR(255) NOT NULL,
@@ -139,9 +137,9 @@ CREATE TABLE usuarios (
   UNIQUE KEY uq_username (username),
   UNIQUE KEY uq_email    (email),
   CONSTRAINT fk_usuario_juez FOREIGN KEY (id_juez) REFERENCES juez(id_juez) ON DELETE SET NULL
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_spanish_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE TABLE log_procedimientos (
+CREATE TABLE IF NOT EXISTS log_procedimientos (
   id_log        INT           NOT NULL AUTO_INCREMENT,
   procedimiento VARCHAR(100)  NOT NULL,
   usuario       VARCHAR(50)   DEFAULT NULL,
@@ -154,8 +152,24 @@ CREATE TABLE log_procedimientos (
   INDEX idx_log_procedimiento (procedimiento),
   INDEX idx_log_fecha         (fecha),
   INDEX idx_log_resultado     (resultado)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_spanish_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- ============================================================
+-- TABLA SESIONES — Sesiones PHP en MySQL
+-- Necesaria para entornos multi-worker (Railway/FrankenPHP)
+-- DbSessionHandler.php lee/escribe aquí
+-- ============================================================
+CREATE TABLE IF NOT EXISTS sesiones (
+  id          VARCHAR(128)  NOT NULL,
+  data        MEDIUMTEXT    NOT NULL,
+  last_access DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  INDEX idx_sesiones_last_access (last_access)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ============================================================
+-- ÍNDICES ADICIONALES
+-- ============================================================
 CREATE INDEX idx_inscripcion_atleta      ON inscripcion(id_atleta);
 CREATE INDEX idx_inscripcion_competicion ON inscripcion(id_competicion);
 CREATE INDEX idx_puntuacion_inscripcion  ON puntuacion(id_inscripcion);
@@ -582,37 +596,7 @@ END$$
 DELIMITER ;
 
 -- ============================================================
--- ROLES Y USUARIOS MYSQL
--- ============================================================
-
-CREATE ROLE IF NOT EXISTS 'admin_bd';
-CREATE ROLE IF NOT EXISTS 'organizador';
-CREATE ROLE IF NOT EXISTS 'juez';
-CREATE ROLE IF NOT EXISTS 'consulta_publica';
-
-GRANT ALL PRIVILEGES ON gestion_competiciones.* TO 'admin_bd';
-GRANT SELECT, INSERT, UPDATE ON gestion_competiciones.categoria       TO 'organizador';
-GRANT ALL PRIVILEGES         ON gestion_competiciones.competicion     TO 'organizador';
-GRANT ALL PRIVILEGES         ON gestion_competiciones.atleta          TO 'organizador';
-GRANT ALL PRIVILEGES         ON gestion_competiciones.inscripcion     TO 'organizador';
-GRANT SELECT                 ON gestion_competiciones.puntuacion      TO 'organizador';
-GRANT SELECT                 ON gestion_competiciones.juez            TO 'organizador';
-GRANT SELECT                 ON gestion_competiciones.resultado_final TO 'organizador';
-GRANT SELECT ON gestion_competiciones.categoria      TO 'juez';
-GRANT SELECT ON gestion_competiciones.competicion    TO 'juez';
-GRANT SELECT (id_inscripcion,id_competicion,id_categoria) ON gestion_competiciones.inscripcion TO 'juez';
-GRANT SELECT, INSERT, UPDATE ON gestion_competiciones.puntuacion TO 'juez';
-GRANT SELECT ON gestion_competiciones.resultado_final TO 'juez';
-GRANT SELECT (id_atleta,nombre,apellido,nacionalidad) ON gestion_competiciones.atleta TO 'consulta_publica';
-GRANT SELECT ON gestion_competiciones.competicion    TO 'consulta_publica';
-GRANT SELECT ON gestion_competiciones.categoria      TO 'consulta_publica';
-GRANT SELECT (id_inscripcion,id_competicion,id_categoria,numero_dorsal) ON gestion_competiciones.inscripcion TO 'consulta_publica';
-GRANT SELECT ON gestion_competiciones.resultado_final TO 'consulta_publica';
-
-FLUSH PRIVILEGES;
-
--- ============================================================
--- DATOS BASE (sin inscripciones ni puntuaciones de prueba)
+-- DATOS BASE
 -- ============================================================
 
 INSERT IGNORE INTO categoria (nombre, altura_min, altura_max, peso_maximo_permitido, edad_min, edad_max) VALUES
@@ -625,11 +609,6 @@ INSERT IGNORE INTO juez (nombre, licencia, activo) VALUES
   ('Ana Martinez',  'JUE-002', 1),
   ('Pedro Sanchez', 'JUE-003', 1);
 
--- Usuarios con hashes reales generados con password_hash() de PHP
--- admin_user   → Admin2025!
--- org_user     → Org2025!
--- juez_roberto → Juez2025!
--- publico      → Publico2025!
 INSERT IGNORE INTO usuarios (username, password_hash, email, rol, id_juez) VALUES
   ('admin_user',   '$2y$10$o/kc4G0.V3H3k99F64bDr.m5uSxXst5wBSxakVWUi6.LxfrviVSv2', 'admin@competicion.es',   'admin',            NULL),
   ('org_user',     '$2y$10$zdqzsfN2bRgOTpZzodiZ2uOJYUDYXJQW2dBGKpfCoJ2IEvBHwCyKm', 'org@competicion.es',     'organizador',      NULL),
@@ -640,4 +619,5 @@ INSERT IGNORE INTO usuarios (username, password_hash, email, rol, id_juez) VALUE
 -- Verificación
 SELECT 'categoria' AS tabla, COUNT(*) AS total FROM categoria
 UNION ALL SELECT 'juez',     COUNT(*) FROM juez
-UNION ALL SELECT 'usuarios', COUNT(*) FROM usuarios;
+UNION ALL SELECT 'usuarios', COUNT(*) FROM usuarios
+UNION ALL SELECT 'sesiones', COUNT(*) FROM sesiones;
