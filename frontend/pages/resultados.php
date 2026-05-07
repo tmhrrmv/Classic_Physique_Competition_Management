@@ -1,41 +1,134 @@
-<!DOCTYPE html>
-<html lang="es">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Resultados – Gestión Competiciones</title>
-    <link rel="stylesheet" href="../css/styles.css">
-</head>
-<body>
+<?php
+$pageTitle = 'Resultados';
+$current   = 'resultados';
+require_once __DIR__ . '/../includes/auth_check.php';
+$current_user = requireAuth(['admin', 'organizador', 'juez', 'consulta_publica']);
+$usuario = htmlspecialchars($current_user['usuario'], ENT_QUOTES, 'UTF-8');
+$rol     = htmlspecialchars($current_user['rol'],     ENT_QUOTES, 'UTF-8');
+$token   = $current_user['token'];
 
-<nav class="navbar">
-    <a href="dashboard.php" class="navbar-brand">Gestión Competiciones</a>
-    <ul class="navbar-nav">
-        <li><a href="competiciones.php">Competiciones</a></li>
-        <li><a href="inscripciones.php">Inscripciones</a></li>
-        <li><a href="puntuaciones.php">Puntuaciones</a></li>
-        <li><a href="resultados.php" class="active">Resultados</a></li>
-    </ul>
-    <button id="btn-logout" class="btn btn-outline">Cerrar sesión</button>
-</nav>
+include __DIR__ . '/../includes/header.php';
+?>
 
-<main class="container">
-    <h2>Resultados por competición</h2>
+<div class="page-header">
+  <div>
+    <h1>Resultados</h1>
+    <p>Podio y clasificacion final por competicion</p>
+  </div>
+  <?php if (in_array($rol, ['admin', 'organizador'])): ?>
+  <button class="btn btn-primary" id="btn-calcular">Calcular resultados</button>
+  <?php endif; ?>
+</div>
 
-    <div class="filter-bar">
-        <label for="filtro-competicion">Competición:</label>
-        <select id="filtro-competicion">
-            <option value="">— Selecciona —</option>
-        </select>
-        <button id="btn-calcular" class="btn btn-primary" style="display:none;">
-            Calcular / Recalcular resultados
-        </button>
+<div style="margin-bottom:1.5rem">
+  <select class="input" id="filtro-competicion" style="max-width:320px">
+    <option value="">Selecciona una competicion...</option>
+  </select>
+</div>
+
+<div id="resultados-container">
+  <div class="card">
+    <div class="card-body" style="text-align:center;padding:3rem;color:var(--muted-foreground)">
+      Selecciona una competicion para ver los resultados
     </div>
+  </div>
+</div>
 
-    <div id="resultados-wrapper"></div>
-</main>
+<script>
+  if (!sessionStorage.getItem('token')) sessionStorage.setItem('token', <?= json_encode($token) ?>);
+  const esAdmin = <?= json_encode(in_array($current_user['rol'], ['admin', 'organizador'])) ?>;
 
-<script src="../js/api.js"></script>
-<script src="../js/auth.js"></script>
-</body>
-</html>
+  document.addEventListener('DOMContentLoaded', async () => {
+    await cargarCompeticiones();
+    document.getElementById('filtro-competicion').onchange = cargarResultados;
+    const btnCalc = document.getElementById('btn-calcular');
+    if (btnCalc) btnCalc.onclick = calcularResultados;
+  });
+
+  async function cargarCompeticiones() {
+    const res  = await fetch('/api/competiciones.php?limit=100', { headers: { Authorization: 'Bearer ' + sessionStorage.getItem('token') } });
+    const data = await res.json();
+    const sel  = document.getElementById('filtro-competicion');
+    (data.data || []).forEach(c => { sel.innerHTML += `<option value="${c.id_competicion}">${esc(c.nombre_evento)}</option>`; });
+  }
+
+  async function cargarResultados() {
+    const compId = document.getElementById('filtro-competicion').value;
+    const cont   = document.getElementById('resultados-container');
+    if (!compId) {
+      cont.innerHTML = '<div class="card"><div class="card-body" style="text-align:center;padding:3rem;color:var(--muted-foreground)">Selecciona una competicion</div></div>';
+      return;
+    }
+    cont.innerHTML = '<div class="card"><div class="card-body" style="text-align:center;padding:3rem;color:var(--muted-foreground)">Cargando...</div></div>';
+    try {
+      const res  = await fetch(`/api/resultados.php?id_competicion=${compId}`, { headers: { Authorization: 'Bearer ' + sessionStorage.getItem('token') } });
+      const data = await res.json();
+      const items = data.data || [];
+
+      if (!items.length) {
+        cont.innerHTML = '<div class="card"><div class="card-body" style="text-align:center;padding:3rem;color:var(--muted-foreground)">No hay resultados calculados para esta competicion</div></div>';
+        return;
+      }
+
+      // Agrupar por categoría
+      const grupos = {};
+      items.forEach(r => {
+        const cat = r.categoria || 'Sin categoria';
+        if (!grupos[cat]) grupos[cat] = [];
+        grupos[cat].push(r);
+      });
+
+      cont.innerHTML = Object.entries(grupos).map(([cat, rows]) => `
+        <div class="card" style="margin-bottom:1.25rem">
+          <div style="padding:1rem 1.5rem;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:.75rem">
+            <h2 style="font-size:1.5rem">${esc(cat)}</h2>
+            <span style="font-size:.8rem;color:var(--muted-foreground)">${rows.length} atletas</span>
+          </div>
+          <div class="card-body" style="padding:0">
+            <table class="table">
+              <thead>
+                <tr><th>Puesto</th><th>Atleta</th><th>Nac.</th><th>Media</th><th>Jueces</th></tr>
+              </thead>
+              <tbody>
+                ${rows.map(r => `
+                  <tr>
+                    <td>
+                      ${r.ranking_final <= 3
+                        ? `<span style="font-family:'Bebas Neue';font-size:1.5rem;color:${['','var(--gold)','oklch(0.8 0.01 80)','oklch(0.65 0.08 40)'][r.ranking_final]}">#${r.ranking_final}</span>`
+                        : `<span style="font-family:'Bebas Neue';font-size:1.25rem;color:var(--muted-foreground)">#${r.ranking_final}</span>`
+                      }
+                    </td>
+                    <td style="font-weight:500">${esc(r.atleta)}</td>
+                    <td style="color:var(--muted-foreground)">${esc(r.nacionalidad ?? '—')}</td>
+                    <td style="font-family:'Bebas Neue';font-size:1.1rem;color:var(--primary)">${r.media_ranking ?? '—'}</td>
+                    <td style="color:var(--muted-foreground)">${r.num_jueces ?? '—'}</td>
+                  </tr>`).join('')}
+              </tbody>
+            </table>
+          </div>
+        </div>`).join('');
+    } catch(e) {
+      cont.innerHTML = `<div class="card"><div class="card-body" style="color:var(--destructive);text-align:center;padding:2rem">${e.message}</div></div>`;
+    }
+  }
+
+  async function calcularResultados() {
+    const compId = document.getElementById('filtro-competicion').value;
+    if (!compId) { alert('Selecciona una competicion primero'); return; }
+    if (!confirm('Calcular resultados para esta competicion?')) return;
+    try {
+      const res  = await fetch('/api/resultados.php', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + sessionStorage.getItem('token') }, body: JSON.stringify({ id_competicion: parseInt(compId) }) });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || 'Error al calcular');
+      cargarResultados();
+    } catch(e) { alert(e.message); }
+  }
+
+  function esc(str) {
+    const d = document.createElement('div');
+    d.textContent = String(str ?? '');
+    return d.innerHTML;
+  }
+</script>
+
+<?php include __DIR__ . '/../includes/footer.php'; ?>
