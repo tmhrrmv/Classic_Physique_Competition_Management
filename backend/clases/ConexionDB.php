@@ -5,12 +5,13 @@ declare(strict_types=1);
 // clases/ConexionDB.php — Patrón Singleton para la conexión BD
 // ============================================================
 // HISTORIAL DE CAMBIOS
-// v1.0 - Implementación del patrón Singleton
+// v1.0 - Implementación del patrón Singleton con PDO
 // v1.1 - Validación constantes, métodos transacciones,
 //        log en __clone/__wakeup
 // v1.2 - Eliminado PDO::MYSQL_ATTR_INIT_COMMAND
-//        No disponible en FrankenPHP sin extensión pdo_mysql
-//        El charset utf8mb4 ya está garantizado en el DSN
+// v1.3 - Cambiado de PDO a mysqli
+//        FrankenPHP en Railway no tiene pdo_mysql compilado
+//        mysqli funciona con mysqlnd que sí está disponible
 // ============================================================
 
 require_once __DIR__ . '/../config.php';
@@ -19,7 +20,7 @@ require_once __DIR__ . '/../helpers.php';
 final class ConexionDB
 {
     private static ?ConexionDB $instancia = null;
-    private PDO $pdo;
+    private \mysqli $conexion;
 
     private function __construct()
     {
@@ -31,23 +32,30 @@ final class ConexionDB
             }
         }
 
-        $dsn = sprintf(
-            'mysql:host=%s;port=%s;dbname=%s;charset=utf8mb4',
-            DB_HOST, DB_PORT, DB_NAME
+        // Suprimir warnings de mysqli_connect para manejarlos manualmente
+        mysqli_report(MYSQLI_REPORT_OFF);
+
+        $this->conexion = new \mysqli(
+            DB_HOST,
+            DB_USER,
+            DB_PASS,
+            DB_NAME,
+            (int) DB_PORT
         );
 
-        try {
-            $this->pdo = new PDO($dsn, DB_USER, DB_PASS, [
-                PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
-                PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-                PDO::ATTR_EMULATE_PREPARES   => false,
-            ]);
-        } catch (\PDOException $e) {
-            logError('ConexionDB::__construct', $e);
+        if ($this->conexion->connect_error) {
+            $error = $this->conexion->connect_error;
+            logError('ConexionDB::__construct', new \RuntimeException($error));
             http_response_code(500);
             jsonResponse(['error' => 'Error de conexión a la base de datos']);
             exit;
         }
+
+        // Forzar charset utf8mb4
+        $this->conexion->set_charset('utf8mb4');
+
+        // Activar excepciones para errores de consulta
+        mysqli_report(MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT);
     }
 
     public static function getInstancia(): self
@@ -58,14 +66,43 @@ final class ConexionDB
         return self::$instancia;
     }
 
-    public function getConexion(): PDO
+    // -------------------------------------------------------
+    // getConexion() — devuelve el objeto mysqli
+    // -------------------------------------------------------
+    public function getConexion(): \mysqli
     {
-        return $this->pdo;
+        return $this->conexion;
     }
 
-    public function beginTransaction(): void { $this->pdo->beginTransaction(); }
-    public function commit(): void           { $this->pdo->commit(); }
-    public function rollBack(): void         { $this->pdo->rollBack(); }
+    // -------------------------------------------------------
+    // getPDO() — crea un PDO wrapper sobre mysqli
+    // Para compatibilidad con código existente que usa PDO
+    // Usa DSN de mysqli ya conectado
+    // -------------------------------------------------------
+    public function getPDO(): \PDO
+    {
+        $dsn = sprintf(
+            'mysql:host=%s;port=%s;dbname=%s;charset=utf8mb4',
+            DB_HOST, DB_PORT, DB_NAME
+        );
+        try {
+            $pdo = new \PDO($dsn, DB_USER, DB_PASS, [
+                \PDO::ATTR_ERRMODE            => \PDO::ERRMODE_EXCEPTION,
+                \PDO::ATTR_DEFAULT_FETCH_MODE => \PDO::FETCH_ASSOC,
+                \PDO::ATTR_EMULATE_PREPARES   => false,
+            ]);
+            return $pdo;
+        } catch (\PDOException $e) {
+            logError('ConexionDB::getPDO', $e);
+            http_response_code(500);
+            jsonResponse(['error' => 'Error de conexión a la base de datos']);
+            exit;
+        }
+    }
+
+    public function beginTransaction(): void { $this->conexion->begin_transaction(); }
+    public function commit(): void           { $this->conexion->commit(); }
+    public function rollBack(): void         { $this->conexion->rollback(); }
 
     private function __clone(): void
     {
