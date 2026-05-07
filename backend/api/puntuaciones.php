@@ -35,7 +35,7 @@ switch ($method) {
     // Roles: admin, organizador ven todo
     //        juez solo ve las suyas
     case 'GET':
-        $payload = requireAuth();
+        $payload = requireJwtAuth();
         handlePuntGet($pdo, $payload);
         break;
 
@@ -43,7 +43,7 @@ switch ($method) {
     // Roles: admin, juez
     case 'POST':
         validateContentType();
-        $payload = requireAuth();
+        $payload = requireJwtAuth();
         requireRole($payload, ROLE_ADMIN, ROLE_JUEZ);
         handlePuntPost($pdo, $payload, $raw_body);
         break;
@@ -53,7 +53,7 @@ switch ($method) {
     case 'PUT':
     case 'PATCH':
         validateContentType();
-        $payload = requireAuth();
+        $payload = requireJwtAuth();
         requireRole($payload, ROLE_ADMIN, ROLE_JUEZ);
         handlePuntPut($pdo, $payload, $raw_body);
         break;
@@ -62,7 +62,7 @@ switch ($method) {
     // Recalcula resultados automáticamente
     // Roles: admin
     case 'DELETE':
-        $payload = requireAuth();
+        $payload = requireJwtAuth();
         requireRole($payload, ROLE_ADMIN);
         handlePuntDelete($pdo, $payload);
         break;

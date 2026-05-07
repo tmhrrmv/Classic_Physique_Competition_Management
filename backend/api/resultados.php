@@ -45,7 +45,7 @@ switch ($method) {
     // Roles: admin
     case 'POST':
         validateContentType();
-        $payload = requireAuth();
+        $payload = requireJwtAuth();
         requireRole($payload, ROLE_ADMIN);
         handleResPost($pdo, $payload, $raw_body);
         break;
@@ -54,7 +54,7 @@ switch ($method) {
     // Solo si la competición está abierta (sin resultados definitivos)
     // Roles: admin
     case 'DELETE':
-        $payload = requireAuth();
+        $payload = requireJwtAuth();
         requireRole($payload, ROLE_ADMIN);
         handleResDelete($pdo);
         break;

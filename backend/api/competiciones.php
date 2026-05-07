@@ -51,7 +51,7 @@ switch ($method) {
     // Roles: admin, organizador
     case 'POST':
         validateContentType();
-        $payload = requireAuth();
+        $payload = requireJwtAuth();
         requireRole($payload, ROLE_ADMIN, ROLE_ORGANIZADOR);
         handleCompPost($pdo, $raw_body);
         break;
@@ -61,7 +61,7 @@ switch ($method) {
     case 'PUT':
     case 'PATCH':
         validateContentType();
-        $payload = requireAuth();
+        $payload = requireJwtAuth();
         requireRole($payload, ROLE_ADMIN, ROLE_ORGANIZADOR);
         handleCompPut($pdo, $raw_body);
         break;
@@ -70,7 +70,7 @@ switch ($method) {
     // Solo si no tiene inscripciones (ON DELETE CASCADE lo gestiona la BD)
     // Roles: admin
     case 'DELETE':
-        $payload = requireAuth();
+        $payload = requireJwtAuth();
         requireRole($payload, ROLE_ADMIN);
         handleCompDelete($pdo);
         break;

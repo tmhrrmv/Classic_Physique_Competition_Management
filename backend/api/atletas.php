@@ -35,19 +35,19 @@ switch ($method) {
         break;
     case 'POST':
         validateContentType();
-        $payload = requireAuth();
+        $payload = requireJwtAuth();
         requireRole($payload, ROLE_ADMIN, ROLE_ORGANIZADOR);
         handleAtletaPost($pdo, $raw_body);
         break;
     case 'PUT':
     case 'PATCH':
         validateContentType();
-        $payload = requireAuth();
+        $payload = requireJwtAuth();
         requireRole($payload, ROLE_ADMIN);
         handleAtletaPut($pdo, $raw_body);
         break;
     case 'DELETE':
-        $payload = requireAuth();
+        $payload = requireJwtAuth();
         requireRole($payload, ROLE_ADMIN);
         $reactivar = filter_input(INPUT_GET, 'reactivar', FILTER_VALIDATE_INT);
         $reactivar ? handleAtletaReactivar($pdo) : handleAtletaDelete($pdo);

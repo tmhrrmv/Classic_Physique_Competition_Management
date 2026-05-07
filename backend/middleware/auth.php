@@ -40,7 +40,7 @@ function isTokenExpired(array $payload): bool
     return ($payload['exp'] ?? 0) < time();
 }
 
-function requireAuth(): array
+function requireJwtAuth(): array
 {
     $header = trim($_SERVER['HTTP_AUTHORIZATION'] ?? '');
 
