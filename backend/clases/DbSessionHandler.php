@@ -2,84 +2,87 @@
 declare(strict_types=1);
 
 // ============================================================
-// clases/DbSessionHandler.php — Manejador de sesiones en MySQL
+// clases/DbSessionHandler.php — Sesiones PHP en MySQL
 // ============================================================
 // HISTORIAL DE CAMBIOS
-// v1.0 - Implementación SessionHandlerInterface
-//        Lee/escribe sesiones en tabla sesiones de MySQL
-//        Soluciona problema de múltiples workers en Railway
-//        gc() limpia sesiones expiradas automáticamente
+// v1.0 - Implementación con PDO
+// v1.1 - Cambiado a mysqli para compatibilidad con Railway
+//        FrankenPHP no tiene pdo_mysql, sí tiene mysqlnd
 // ============================================================
 
 class DbSessionHandler implements SessionHandlerInterface
 {
-    private PDO $pdo;
+    private \mysqli $db;
 
-    public function __construct(PDO $pdo)
+    public function __construct(\mysqli $db)
     {
-        $this->pdo = $pdo;
+        $this->db = $db;
     }
 
-    // Crea la tabla sesiones si no existe y abre la sesión
     public function open(string $path, string $name): bool
     {
-        $this->pdo->exec(
+        // Crear tabla si no existe
+        $this->db->query(
             "CREATE TABLE IF NOT EXISTS sesiones (
-                id          VARCHAR(128)  NOT NULL,
-                data        MEDIUMTEXT    NOT NULL DEFAULT '',
-                last_access DATETIME      NOT NULL,
+                id          VARCHAR(128) NOT NULL,
+                data        MEDIUMTEXT   NOT NULL,
+                last_access DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
                 PRIMARY KEY (id),
                 INDEX idx_sesiones_last_access (last_access)
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
         );
         return true;
     }
 
-    // Cierra la sesión — no necesitamos hacer nada aquí
     public function close(): bool
     {
         return true;
     }
 
-    // Lee los datos de la sesión desde MySQL
     public function read(string $id): string|false
     {
-        $stmt = $this->pdo->prepare(
+        $stmt = $this->db->prepare(
             'SELECT data FROM sesiones WHERE id = ? AND last_access > DATE_SUB(NOW(), INTERVAL 2 HOUR)'
         );
-        $stmt->execute([$id]);
-        $row = $stmt->fetch();
+        $stmt->bind_param('s', $id);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        $row    = $result->fetch_assoc();
+        $stmt->close();
         return $row ? $row['data'] : '';
     }
 
-    // Escribe los datos de la sesión en MySQL
-    // UPSERT — crea si no existe, actualiza si existe
     public function write(string $id, string $data): bool
     {
-        $stmt = $this->pdo->prepare(
+        $stmt = $this->db->prepare(
             'INSERT INTO sesiones (id, data, last_access)
              VALUES (?, ?, NOW())
              ON DUPLICATE KEY UPDATE data = VALUES(data), last_access = NOW()'
         );
-        return $stmt->execute([$id, $data]);
+        $stmt->bind_param('ss', $id, $data);
+        $result = $stmt->execute();
+        $stmt->close();
+        return $result;
     }
 
-    // Destruye la sesión — borra de MySQL
     public function destroy(string $id): bool
     {
-        $stmt = $this->pdo->prepare('DELETE FROM sesiones WHERE id = ?');
-        return $stmt->execute([$id]);
+        $stmt = $this->db->prepare('DELETE FROM sesiones WHERE id = ?');
+        $stmt->bind_param('s', $id);
+        $result = $stmt->execute();
+        $stmt->close();
+        return $result;
     }
 
-    // Limpia sesiones expiradas — se ejecuta periódicamente
-    // $maxlifetime viene de session.gc_maxlifetime (por defecto 1440 seg)
-    // Nosotros usamos 2 horas (7200 seg)
     public function gc(int $maxlifetime): int|false
     {
-        $stmt = $this->pdo->prepare(
+        $stmt = $this->db->prepare(
             'DELETE FROM sesiones WHERE last_access < DATE_SUB(NOW(), INTERVAL ? SECOND)'
         );
-        $stmt->execute([$maxlifetime]);
-        return $stmt->rowCount();
+        $stmt->bind_param('i', $maxlifetime);
+        $stmt->execute();
+        $rows = $stmt->affected_rows;
+        $stmt->close();
+        return $rows;
     }
 }
