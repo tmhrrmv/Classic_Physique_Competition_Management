@@ -32,9 +32,6 @@ final class ConexionDB
             }
         }
 
-        // Suprimir warnings de mysqli_connect para manejarlos manualmente
-        mysqli_report(MYSQLI_REPORT_OFF);
-
         $this->conexion = new \mysqli(
             DB_HOST,
             DB_USER,
@@ -54,8 +51,6 @@ final class ConexionDB
         // Forzar charset utf8mb4
         $this->conexion->set_charset('utf8mb4');
 
-        // Activar excepciones para errores de consulta
-        mysqli_report(MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT);
     }
 
     public static function getInstancia(): self
