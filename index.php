@@ -7,8 +7,11 @@
 // v1.1 - Añadido soporte para archivos estáticos
 //        CSS, JS, imágenes y fuentes se sirven con
 //        Content-Type correcto en lugar de text/html
-//        Sin esto el navegador ignora los estilos CSS
+// v1.2 - ob_start() para capturar output antes de headers
+//        Evita "headers already sent" por warnings de PHP
 // ============================================================
+
+ob_start();
 
 $uri = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
 
@@ -20,6 +23,7 @@ if (strpos($uri, '/api/') === 0) {
     if (file_exists($file)) {
         require $file;
     } else {
+        ob_end_clean();
         http_response_code(404);
         echo json_encode(['error' => 'Endpoint no encontrado']);
     }
@@ -28,8 +32,6 @@ if (strpos($uri, '/api/') === 0) {
 
 // -------------------------------------------------------
 // Archivos estáticos — servir con Content-Type correcto
-// Sin esto el router los sirve como text/html y el
-// navegador ignora los estilos CSS y scripts JS
 // -------------------------------------------------------
 $ext = strtolower(pathinfo($uri, PATHINFO_EXTENSION));
 $staticTypes = [
@@ -48,10 +50,12 @@ $staticTypes = [
 if (isset($staticTypes[$ext])) {
     $file = __DIR__ . '/frontend' . $uri;
     if (file_exists($file)) {
+        ob_end_clean();
         header('Content-Type: ' . $staticTypes[$ext]);
         readfile($file);
         exit;
     }
+    ob_end_clean();
     http_response_code(404);
     exit;
 }
@@ -59,6 +63,7 @@ if (isset($staticTypes[$ext])) {
 // -------------------------------------------------------
 // Todo lo demás -> frontend PHP
 // -------------------------------------------------------
+ob_end_clean();
 $file = __DIR__ . '/frontend' . ($uri === '/' ? '/index.php' : $uri);
 if (file_exists($file)) {
     require $file;
