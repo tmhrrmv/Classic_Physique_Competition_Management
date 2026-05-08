@@ -1,72 +1,21 @@
 <?php
 // ============================================================
-// index.php — Router principal de Railway
+// frontend/index.php — Punto de entrada del frontend
 // ============================================================
 // HISTORIAL DE CAMBIOS
-// v1.0 - Router básico: /api/ -> backend, resto -> frontend
-// v1.1 - Añadido soporte para archivos estáticos
-//        CSS, JS, imágenes y fuentes se sirven con
-//        Content-Type correcto en lugar de text/html
-// v1.2 - ob_start() para capturar output antes de headers
-//        Evita "headers already sent" por warnings de PHP
+// v1.0 - Redirige según sesión activa
+// v1.1 - Usa auth_check.php con SessionHandler MySQL
+// v1.2 - Simplificado — solo redirige al login o dashboard
+//        El router raíz (index.php) maneja el routing
 // ============================================================
 
-ob_start();
+define('AUTH_CHECK_SKIP_AUTO', true);
+require_once __DIR__ . '/includes/auth_check.php';
+startSecureSession();
 
-$uri = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
-
-// -------------------------------------------------------
-// Rutas de la API -> backend
-// -------------------------------------------------------
-if (strpos($uri, '/api/') === 0) {
-    $file = __DIR__ . '/backend' . $uri;
-    if (file_exists($file)) {
-        require $file;
-    } else {
-        ob_end_clean();
-        http_response_code(404);
-        echo json_encode(['error' => 'Endpoint no encontrado']);
-    }
-    exit;
-}
-
-// -------------------------------------------------------
-// Archivos estáticos — servir con Content-Type correcto
-// -------------------------------------------------------
-$ext = strtolower(pathinfo($uri, PATHINFO_EXTENSION));
-$staticTypes = [
-    'css'   => 'text/css',
-    'js'    => 'application/javascript',
-    'png'   => 'image/png',
-    'jpg'   => 'image/jpeg',
-    'jpeg'  => 'image/jpeg',
-    'gif'   => 'image/gif',
-    'svg'   => 'image/svg+xml',
-    'ico'   => 'image/x-icon',
-    'woff'  => 'font/woff',
-    'woff2' => 'font/woff2',
-];
-
-if (isset($staticTypes[$ext])) {
-    $file = __DIR__ . '/frontend' . $uri;
-    if (file_exists($file)) {
-        ob_end_clean();
-        header('Content-Type: ' . $staticTypes[$ext]);
-        readfile($file);
-        exit;
-    }
-    ob_end_clean();
-    http_response_code(404);
-    exit;
-}
-
-// -------------------------------------------------------
-// Todo lo demás -> frontend PHP
-// -------------------------------------------------------
-ob_end_clean();
-$file = __DIR__ . '/frontend' . ($uri === '/' ? '/index.php' : $uri);
-if (file_exists($file)) {
-    require $file;
+if (isset($_SESSION['usuario'])) {
+    header('Location: /pages/dashboard.php');
 } else {
-    require __DIR__ . '/frontend/index.php';
+    header('Location: /pages/login.php');
 }
+exit;
