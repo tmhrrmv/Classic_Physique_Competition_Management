@@ -81,7 +81,10 @@ if (!preg_match('/^[a-zA-Z0-9\-]{1,64}$/', $request_id)) {
 define('REQUEST_ID', $request_id);
 
 // Cabecera de trazabilidad para todas las peticiones
-header('X-Request-ID: ' . REQUEST_ID);
+// Solo enviar X-Request-ID en peticiones API
+if (strpos($_SERVER['REQUEST_URI'] ?? '', '/api/') === 0) {
+    header('X-Request-ID: ' . REQUEST_ID);
+}
 
 // Headers JSON y CORS sólo para endpoints de la API
 $isApiRequest = (strpos($_SERVER['REQUEST_URI'] ?? '', '/api/') !== false);
