@@ -193,9 +193,22 @@ if (!defined('APP_BASE_URL')) {
     define('APP_BASE_URL', '');
 }
 
-// Cargar config para ConexionDB
-require_once dirname(__DIR__, 2) . '/backend/config.php';
+// Cargar solo helpers y definir constantes de BD sin cargar config.php completo
+// config.php envía headers que pueden romper páginas HTML
 require_once dirname(__DIR__, 2) . '/backend/helpers.php';
+
+// Definir constantes de BD si no están definidas
+if (!defined('DB_HOST')) {
+    define('DB_HOST', getenv('DB_HOST') ?: '');
+    define('DB_PORT', getenv('DB_PORT') ?: '3306');
+    define('DB_NAME', getenv('DB_NAME') ?: '');
+    define('DB_USER', getenv('DB_USER') ?: '');
+    define('DB_PASS', getenv('DB_PASS') ?: '');
+}
+// Constantes de seguridad
+if (!defined('MAX_INTENTOS'))    define('MAX_INTENTOS',    5);
+if (!defined('BLOQUEO_MINUTOS')) define('BLOQUEO_MINUTOS', 15);
+if (!defined('JWT_SECRET'))      define('JWT_SECRET', getenv('JWT_SECRET') ?: '');
 
 startSecureSession();
 
