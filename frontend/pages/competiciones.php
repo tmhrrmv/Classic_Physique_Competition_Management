@@ -4,9 +4,10 @@
 // ============================================================
 // HISTORIAL DE CAMBIOS
 // v1.0 - Datos hardcodeados de ejemplo
-// v1.1 - Eliminados datos de ejemplo
-//        Tabla carga datos reales via API
-//        Corregida ruta del footer
+// v1.1 - Eliminados datos de ejemplo, carga desde API
+// v1.2 - JS unificado inline, eliminada dependencia de
+//        competiciones.js, AuthAPI, CompeticionesAPI y UI
+//        Corregido id del botón cerrar modal (btn-cerrar)
 // ============================================================
 $pageTitle = 'Competiciones';
 $current   = 'competiciones';
@@ -24,7 +25,7 @@ include __DIR__ . '/../includes/header.php';
   <button class="btn btn-primary" id="btn-nueva">+ Nueva competicion</button>
 </div>
 
-<div style="margin-bottom:1.5rem;display:flex;gap:1rem;flex-wrap:wrap">
+<div style="margin-bottom:1.5rem">
   <select class="input" id="filtro-estado" style="max-width:220px">
     <option value="">Todos los estados</option>
     <option value="abierta">Abierta</option>
@@ -83,17 +84,34 @@ include __DIR__ . '/../includes/header.php';
 </div>
 
 <script>
+  if (!sessionStorage.getItem('token')) sessionStorage.setItem('token', <?= json_encode($token) ?>);
+
   let paginaActual = 1;
   const LIMITE = 10;
+
+  const badges = {
+    abierta:   'badge-success',
+    en_curso:  'badge-primary',
+    cerrada:   'badge-muted',
+    sin_fecha: 'badge-muted'
+  };
 
   document.addEventListener('DOMContentLoaded', () => {
     cargarCompeticiones();
     document.getElementById('filtro-estado').onchange = () => { paginaActual = 1; cargarCompeticiones(); };
-    document.getElementById('btn-nueva').onclick = () => abrirModal();
-    document.getElementById('btn-cerrar').onclick = cerrarModal;
+    document.getElementById('btn-nueva').onclick    = () => abrirModal();
+    document.getElementById('btn-cerrar').onclick   = cerrarModal;
     document.getElementById('btn-cancelar').onclick = cerrarModal;
-    document.getElementById('btn-guardar').onclick = guardar;
-    document.getElementById('modal-overlay').onclick = (e) => { if (e.target === document.getElementById('modal-overlay')) cerrarModal(); };
+    document.getElementById('btn-guardar').onclick  = guardar;
+    document.getElementById('modal-overlay').onclick = (e) => {
+      if (e.target === document.getElementById('modal-overlay')) cerrarModal();
+    };
+    document.addEventListener('click', (e) => {
+      const btnEditar   = e.target.closest('[data-action="editar"]');
+      const btnEliminar = e.target.closest('[data-action="eliminar"]');
+      if (btnEditar)   editarComp(btnEditar.dataset.id);
+      if (btnEliminar) eliminarComp(btnEliminar.dataset.id, btnEliminar.dataset.nombre);
+    });
   });
 
   async function cargarCompeticiones() {
@@ -103,14 +121,16 @@ include __DIR__ . '/../includes/header.php';
     try {
       const params = new URLSearchParams({ page: paginaActual, limit: LIMITE });
       if (estado) params.append('estado', estado);
-      const res  = await fetch('/api/competiciones.php?' + params, { headers: { Authorization: 'Bearer ' + sessionStorage.getItem('token') } });
+      const res  = await fetch('/api/competiciones.php?' + params, {
+        headers: { Authorization: 'Bearer ' + sessionStorage.getItem('token') }
+      });
       const data = await res.json();
       const items = data.data || [];
       if (!items.length) {
         tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:2rem;color:var(--muted-foreground)">No hay competiciones</td></tr>';
+        document.getElementById('paginacion').innerHTML = '';
         return;
       }
-      const badges = { abierta: 'badge-success', en_curso: 'badge-primary', cerrada: 'badge-muted', sin_fecha: 'badge-muted' };
       tbody.innerHTML = items.map(c => `
         <tr>
           <td style="font-family:monospace;color:var(--muted-foreground)">#${c.id_competicion}</td>
@@ -120,8 +140,10 @@ include __DIR__ . '/../includes/header.php';
           <td><span class="badge ${badges[c.estado] ?? 'badge-muted'}">${c.estado ?? '—'}</span></td>
           <td>${c.total_inscritos ?? 0}</td>
           <td style="display:flex;gap:.5rem">
-            <button class="btn btn-outline" style="font-size:.75rem;padding:.35rem .75rem" data-action="editar" data-id="${c.id_competicion}">Editar</button>
-            <button class="btn btn-outline" style="font-size:.75rem;padding:.35rem .75rem;color:var(--destructive);border-color:var(--destructive)" data-action="eliminar" data-id="${c.id_competicion}" data-nombre="${esc(c.nombre_evento)}">Eliminar</button>
+            <button class="btn btn-outline" style="font-size:.75rem;padding:.35rem .75rem"
+              data-action="editar" data-id="${c.id_competicion}">Editar</button>
+            <button class="btn btn-outline" style="font-size:.75rem;padding:.35rem .75rem;color:var(--destructive);border-color:var(--destructive)"
+              data-action="eliminar" data-id="${c.id_competicion}" data-nombre="${esc(c.nombre_evento)}">Eliminar</button>
           </td>
         </tr>`).join('');
       renderPaginacion(data.pagination || {});
@@ -129,13 +151,6 @@ include __DIR__ . '/../includes/header.php';
       tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;color:var(--destructive);padding:2rem">${e.message}</td></tr>`;
     }
   }
-
-  document.addEventListener('click', (e) => {
-    const btnEditar   = e.target.closest('[data-action="editar"]');
-    const btnEliminar = e.target.closest('[data-action="eliminar"]');
-    if (btnEditar)   editarComp(btnEditar.dataset.id);
-    if (btnEliminar) eliminarComp(btnEliminar.dataset.id, btnEliminar.dataset.nombre);
-  });
 
   function renderPaginacion(pag) {
     const el = document.getElementById('paginacion');
@@ -150,22 +165,27 @@ include __DIR__ . '/../includes/header.php';
   function irPagina(n) { paginaActual = n; cargarCompeticiones(); }
 
   function abrirModal(comp = null) {
-    document.getElementById('modal-titulo').textContent = comp ? 'Editar Competicion' : 'Nueva Competicion';
-    document.getElementById('edit-id').value      = comp?.id_competicion ?? '';
-    document.getElementById('campo-nombre').value = comp?.nombre_evento  ?? '';
-    document.getElementById('campo-fecha').value  = comp?.fecha          ?? '';
-    document.getElementById('campo-lugar').value  = comp?.lugar          ?? '';
-    document.getElementById('btn-text').textContent = comp ? 'Actualizar' : 'Crear';
+    document.getElementById('modal-titulo').textContent  = comp ? 'Editar Competicion' : 'Nueva Competicion';
+    document.getElementById('edit-id').value             = comp?.id_competicion ?? '';
+    document.getElementById('campo-nombre').value        = comp?.nombre_evento  ?? '';
+    document.getElementById('campo-fecha').value         = comp?.fecha          ?? '';
+    document.getElementById('campo-lugar').value         = comp?.lugar          ?? '';
+    document.getElementById('btn-text').textContent      = comp ? 'Actualizar' : 'Crear';
     document.getElementById('modal-error').style.display = 'none';
     document.getElementById('modal-overlay').style.display = 'flex';
   }
 
-  function cerrarModal() { document.getElementById('modal-overlay').style.display = 'none'; }
+  function cerrarModal() {
+    document.getElementById('modal-overlay').style.display = 'none';
+  }
 
   async function editarComp(id) {
     try {
-      const res  = await fetch(`/api/competiciones.php?id=${id}`, { headers: { Authorization: 'Bearer ' + sessionStorage.getItem('token') } });
+      const res  = await fetch(`/api/competiciones.php?id=${id}`, {
+        headers: { Authorization: 'Bearer ' + sessionStorage.getItem('token') }
+      });
       const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Error al cargar');
       abrirModal(data);
     } catch(e) { alert(e.message); }
   }
@@ -176,24 +196,47 @@ include __DIR__ . '/../includes/header.php';
     const fecha  = document.getElementById('campo-fecha').value;
     const lugar  = document.getElementById('campo-lugar').value.trim();
     const errEl  = document.getElementById('modal-error');
-    if (!nombre) { errEl.textContent = 'El nombre es obligatorio'; errEl.style.display = 'block'; return; }
+
+    if (!nombre) {
+      errEl.textContent = 'El nombre es obligatorio';
+      errEl.style.display = 'block';
+      return;
+    }
+
+    document.getElementById('btn-text').textContent     = id ? 'Actualizando...' : 'Creando...';
+    document.getElementById('btn-guardar').disabled     = true;
+    errEl.style.display = 'none';
+
     try {
       const method = id ? 'PATCH' : 'POST';
       const url    = id ? `/api/competiciones.php?id=${id}` : '/api/competiciones.php';
-      const res    = await fetch(url, { method, headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + sessionStorage.getItem('token') }, body: JSON.stringify({ nombre_evento: nombre, fecha: fecha || null, lugar: lugar || null }) });
-      const json   = await res.json();
-      if (!res.ok) throw new Error(json.error || 'Error');
+      const res    = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + sessionStorage.getItem('token') },
+        body: JSON.stringify({ nombre_evento: nombre, fecha: fecha || null, lugar: lugar || null })
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || json.errors?.join(', ') || 'Error');
       cerrarModal();
       cargarCompeticiones();
-    } catch(e) { errEl.textContent = e.message; errEl.style.display = 'block'; }
+    } catch(e) {
+      errEl.textContent = e.message;
+      errEl.style.display = 'block';
+    } finally {
+      document.getElementById('btn-text').textContent  = id ? 'Actualizar' : 'Crear';
+      document.getElementById('btn-guardar').disabled  = false;
+    }
   }
 
   async function eliminarComp(id, nombre) {
-    if (!confirm(`Eliminar "${nombre}"?`)) return;
+    if (!confirm(`Eliminar "${nombre}"?\nEsta accion no se puede deshacer.`)) return;
     try {
-      const res  = await fetch(`/api/competiciones.php?id=${id}`, { method: 'DELETE', headers: { Authorization: 'Bearer ' + sessionStorage.getItem('token') } });
+      const res  = await fetch(`/api/competiciones.php?id=${id}`, {
+        method: 'DELETE',
+        headers: { Authorization: 'Bearer ' + sessionStorage.getItem('token') }
+      });
       const json = await res.json();
-      if (!res.ok) throw new Error(json.error || 'Error');
+      if (!res.ok) throw new Error(json.error || 'Error al eliminar');
       cargarCompeticiones();
     } catch(e) { alert(e.message); }
   }
