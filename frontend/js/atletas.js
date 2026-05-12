@@ -74,6 +74,11 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (e.key === 'Enter') { e.preventDefault(); inscribir(); }
         if (e.key === 'Escape') cerrarModalInscribir();
     });
+    
+    DOM.buscadorNombre().addEventListener('input', () => {
+    paginaActual = 1;
+    cargarAtletas();
+});
 
     DOM.modalInscribir().addEventListener('click', (e) => {
         if (e.target === DOM.modalInscribir()) cerrarModalInscribir();
@@ -105,9 +110,15 @@ async function cargarAtletas() {
         </td></tr>`;
 
     const activo = DOM.filtroActivo().value;
+    const search = DOM.buscadorNombre().value.trim();   // ← nuevo: obtener texto del buscador
 
     try {
-        const data    = await AtletasAPI.getAll({ page: paginaActual, limit: LIMITE_POR_PAGINA, activo });
+        const data = await AtletasAPI.getAll({ 
+            page: paginaActual, 
+            limit: LIMITE_POR_PAGINA, 
+            activo,
+            search   // ← nuevo: enviar el término al backend
+        });
         const atletas = data.data || [];
         const pag     = data.pagination || {};
 
@@ -119,10 +130,9 @@ async function cargarAtletas() {
         DOM.tablaBody().innerHTML = `
             <tr><td colspan="6" style="text-align:center; color:var(--error); padding:32px">
                 ${escapeHtml(msg)}
-            </td></tr>`;
+            </td><tr>`;
     }
 }
-
 // -------------------------------------------------------
 // renderTabla()
 // -------------------------------------------------------
