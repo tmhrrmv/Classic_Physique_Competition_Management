@@ -7,15 +7,10 @@ declare(strict_types=1);
 // HISTORIAL DE CAMBIOS
 // v1.0 - CRUD básico con SQL directo
 // v1.1 - Migrado a sp_registrar_puntuacion y sp_anular_puntuacion
-//      - Aplicadas todas las mejoras del checklist:
-//        helpers.php, Content-Type, paginación, validaciones,
-//        logError, jsonResponse, Location, Allow, PATCH,
-//        SQL_CALC_FOUND_ROWS, X-Total-Count, Cache-Control
+//      - Aplicadas todas las mejoras del checklist
 //      - Juez solo puede ver/registrar sus propias puntuaciones
-//        usando id_juez del JWT
-//      - Validación que la competición no esté abierta
-//        antes de registrar puntuación
-//      - ranking_otorgado validado como entero >= 1
+// v1.2 - Añadido GET ?jueces=1 para listar jueces activos
+//        Usado por puntuaciones.php al abrir el modal
 // ============================================================
 
 require_once __DIR__ . '/../config.php';
@@ -30,17 +25,11 @@ $raw_body = in_array($method, ['POST','PUT','PATCH']) ? file_get_contents('php:/
 
 switch ($method) {
 
-    // GET /api/puntuaciones?id_inscripcion=X → puntuaciones de una inscripción
-    // GET /api/puntuaciones?id_competicion=X → todas las puntuaciones de un evento
-    // Roles: admin, organizador ven todo
-    //        juez solo ve las suyas
     case 'GET':
         $payload = requireJwtAuth();
         handlePuntGet($pdo, $payload);
         break;
 
-    // POST /api/puntuaciones → registrar puntuación via sp_registrar_puntuacion
-    // Roles: admin, juez
     case 'POST':
         validateContentType();
         $payload = requireJwtAuth();
@@ -48,8 +37,6 @@ switch ($method) {
         handlePuntPost($pdo, $payload, $raw_body);
         break;
 
-    // PUT/PATCH /api/puntuaciones?id=X → corregir ranking
-    // Roles: admin, juez (solo la suya)
     case 'PUT':
     case 'PATCH':
         validateContentType();
@@ -58,9 +45,6 @@ switch ($method) {
         handlePuntPut($pdo, $payload, $raw_body);
         break;
 
-    // DELETE /api/puntuaciones?id=X → anular via sp_anular_puntuacion
-    // Recalcula resultados automáticamente
-    // Roles: admin
     case 'DELETE':
         $payload = requireJwtAuth();
         requireRole($payload, ROLE_ADMIN);
@@ -73,26 +57,39 @@ switch ($method) {
 
 // -------------------------------------------------------
 // GET
-// Juez solo ve sus propias puntuaciones (id_juez del JWT)
 // -------------------------------------------------------
 function handlePuntGet(PDO $pdo, array $payload): void
 {
+    // v1.2: GET ?jueces=1 → lista jueces activos para el modal
+    $jueces = filter_input(INPUT_GET, 'jueces', FILTER_VALIDATE_INT);
+    if ($jueces) {
+        header('Cache-Control: no-store, max-age=0');
+        $stmt = $pdo->query(
+            'SELECT id_juez, nombre, licencia
+               FROM juez
+              WHERE activo = 1
+              ORDER BY nombre'
+        );
+        jsonResponse(['data' => $stmt->fetchAll()]);
+        return;
+    }
+
     $id_inscripcion = validateIntPositive(filter_input(INPUT_GET, 'id_inscripcion', FILTER_VALIDATE_INT));
     $id_competicion = validateIntPositive(filter_input(INPUT_GET, 'id_competicion', FILTER_VALIDATE_INT));
 
     if (!$id_inscripcion && !$id_competicion) {
         http_response_code(400);
-        jsonResponse(['error' => 'Se requiere id_inscripcion o id_competicion']);
+        jsonResponse(['error' => 'Se requiere id_inscripcion, id_competicion o jueces=1']);
         return;
     }
 
-    $isJuezRole = ($payload['role'] ?? '') === ROLE_JUEZ;
+    $isJuezRole  = ($payload['role'] ?? '') === ROLE_JUEZ;
     $id_juez_jwt = $isJuezRole ? ($payload['id_juez'] ?? null) : null;
 
     header('Cache-Control: no-store, max-age=0');
     $pagination = getPaginationParams(50, 200);
 
-    // GET ?id_inscripcion=X → puntuaciones de una inscripción
+    // GET ?id_inscripcion=X
     if ($id_inscripcion) {
         $sql = 'SELECT SQL_CALC_FOUND_ROWS
                        p.id_puntuacion, p.id_inscripcion, p.id_juez,
@@ -102,24 +99,17 @@ function handlePuntGet(PDO $pdo, array $payload): void
                   JOIN juez j ON j.id_juez = p.id_juez
                  WHERE p.id_inscripcion = ?';
         $params = [$id_inscripcion];
-
-        // Juez solo ve la suya
-        if ($id_juez_jwt) {
-            $sql .= ' AND p.id_juez = ?';
-            $params[] = $id_juez_jwt;
-        }
-
+        if ($id_juez_jwt) { $sql .= ' AND p.id_juez = ?'; $params[] = $id_juez_jwt; }
         $sql .= ' ORDER BY j.licencia LIMIT ? OFFSET ?';
         $params[] = $pagination['limit'];
         $params[] = $pagination['offset'];
-
         $stmt = $pdo->prepare($sql);
         $stmt->execute($params);
         paginatedResponse($pdo, $stmt->fetchAll(), $pagination);
         return;
     }
 
-    // GET ?id_competicion=X → todas las puntuaciones del evento
+    // GET ?id_competicion=X
     $sql = 'SELECT SQL_CALC_FOUND_ROWS
                    p.id_puntuacion,
                    CONCAT(a.nombre, " ", a.apellido) AS atleta,
@@ -135,17 +125,10 @@ function handlePuntGet(PDO $pdo, array $payload): void
               LEFT JOIN categoria cat ON cat.id_categoria = i.id_categoria
              WHERE i.id_competicion = ?';
     $params = [$id_competicion];
-
-    // Juez solo ve las suyas
-    if ($id_juez_jwt) {
-        $sql .= ' AND p.id_juez = ?';
-        $params[] = $id_juez_jwt;
-    }
-
+    if ($id_juez_jwt) { $sql .= ' AND p.id_juez = ?'; $params[] = $id_juez_jwt; }
     $sql .= ' ORDER BY a.apellido, j.licencia LIMIT ? OFFSET ?';
     $params[] = $pagination['limit'];
     $params[] = $pagination['offset'];
-
     $stmt = $pdo->prepare($sql);
     $stmt->execute($params);
     paginatedResponse($pdo, $stmt->fetchAll(), $pagination);
@@ -165,16 +148,13 @@ function handlePuntPost(PDO $pdo, array $payload, string $raw_body): void
 
     $errors = [];
 
-    // id_inscripcion obligatorio
     $id_inscripcion = validateIntPositive($data['id_inscripcion'] ?? null);
     if (!$id_inscripcion) $errors[] = 'id_inscripcion debe ser un entero positivo';
 
-    // ranking_otorgado obligatorio >= 1
-    $ranking = isset($data['ranking_otorgado']) ? (int) $data['ranking_otorgado'] : null;
-    if ($ranking === null)  $errors[] = 'ranking_otorgado es requerido';
-    if ($ranking !== null && $ranking < 1) $errors[] = 'ranking_otorgado debe ser >= 1';
+    $ranking = isset($data['ranking']) ? (int) $data['ranking'] : null;
+    if ($ranking === null)           $errors[] = 'ranking es requerido';
+    if ($ranking !== null && $ranking < 1) $errors[] = 'ranking debe ser >= 1';
 
-    // id_juez: si es rol juez usar el del JWT, si es admin puede especificarlo
     $isJuezRole = ($payload['role'] ?? '') === ROLE_JUEZ;
     if ($isJuezRole) {
         $id_juez = $payload['id_juez'] ?? null;
@@ -207,10 +187,9 @@ function handlePuntPost(PDO $pdo, array $payload, string $raw_body): void
             ':ip'             => $ip,
         ]);
 
-        $result = $pdo->query('SELECT @id_puntuacion AS id_puntuacion')->fetch();
+        $result        = $pdo->query('SELECT @id_puntuacion AS id_puntuacion')->fetch();
         $id_puntuacion = (int) $result['id_puntuacion'];
 
-        // Devolver objeto completo
         $punt = $pdo->prepare(
             'SELECT p.id_puntuacion, p.id_inscripcion, p.id_juez,
                     j.nombre AS nombre_juez, j.licencia, p.ranking_otorgado
@@ -236,8 +215,7 @@ function handlePuntPost(PDO $pdo, array $payload, string $raw_body): void
 }
 
 // -------------------------------------------------------
-// PUT/PATCH — corregir ranking de una puntuación
-// Juez solo puede corregir la suya
+// PUT/PATCH — corregir ranking
 // -------------------------------------------------------
 function handlePuntPut(PDO $pdo, array $payload, string $raw_body): void
 {
@@ -262,7 +240,6 @@ function handlePuntPut(PDO $pdo, array $payload, string $raw_body): void
         return;
     }
 
-    // Verificar que la puntuación existe y pertenece al juez si es rol juez
     $isJuezRole  = ($payload['role'] ?? '') === ROLE_JUEZ;
     $id_juez_jwt = $isJuezRole ? ($payload['id_juez'] ?? null) : null;
 
@@ -276,7 +253,6 @@ function handlePuntPut(PDO $pdo, array $payload, string $raw_body): void
         return;
     }
 
-    // Juez solo puede editar la suya
     if ($id_juez_jwt && (int) $punt['id_juez'] !== $id_juez_jwt) {
         http_response_code(403);
         jsonResponse(['error' => 'Solo puedes modificar tus propias puntuaciones']);
@@ -290,8 +266,7 @@ function handlePuntPut(PDO $pdo, array $payload, string $raw_body): void
 }
 
 // -------------------------------------------------------
-// DELETE — anular puntuación via sp_anular_puntuacion
-// Recalcula resultados automáticamente
+// DELETE — anular via sp_anular_puntuacion
 // -------------------------------------------------------
 function handlePuntDelete(PDO $pdo, array $payload): void
 {
@@ -307,7 +282,6 @@ function handlePuntDelete(PDO $pdo, array $payload): void
     try {
         $stmt = $pdo->prepare('CALL sp_anular_puntuacion(:id, :ip, @filas)');
         $stmt->execute([':id' => $id, ':ip' => $ip]);
-
         $result = $pdo->query('SELECT @filas AS filas')->fetch();
 
         jsonResponse([
