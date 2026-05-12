@@ -138,8 +138,10 @@ include __DIR__ . '/../includes/header.php';
     try {
       const params = new URLSearchParams({ page: paginaActual, limit: LIMITE });
       const compId = document.getElementById('filtro-competicion').value;
+      const buscar = document.getElementById('filtro-buscar').value.trim();
       if (compId) params.append('id_competicion', compId);
-      const res  = await fetch('/api/atletas.php?' + params, { headers: { Authorization: 'Bearer ' + sessionStorage.getItem('token') } });
+      if (buscar) params.append('buscar', buscar);
+      const res  = await fetch('/api/inscripciones.php?' + params, { headers: { Authorization: 'Bearer ' + sessionStorage.getItem('token') } });
       const data = await res.json();
       const items = data.data || [];
       if (!items.length) {
@@ -198,6 +200,11 @@ include __DIR__ . '/../includes/header.php';
   function abrirModal() {
     document.getElementById('modal-overlay').style.display = 'flex';
     document.getElementById('modal-error').style.display = 'none';
+    // Pre-seleccionar la competición activa en el filtro
+    const compFiltro = document.getElementById('filtro-competicion').value;
+    if (compFiltro) {
+      document.getElementById('f-competicion').value = compFiltro;
+    }
   }
 
   function cerrarModal() {

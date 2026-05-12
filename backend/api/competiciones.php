@@ -327,20 +327,6 @@ function handleCompDelete(PDO $pdo): void
         return;
     }
 
-    // Verificar que no tenga puntuaciones registradas
-    // No tiene sentido borrar un evento con resultados
-    $check = $pdo->prepare(
-        'SELECT COUNT(*) FROM puntuacion p
-           JOIN inscripcion i ON i.id_inscripcion = p.id_inscripcion
-          WHERE i.id_competicion = ?'
-    );
-    $check->execute([$id]);
-    if ((int) $check->fetchColumn() > 0) {
-        http_response_code(409);
-        jsonResponse(['error' => 'No se puede eliminar una competición que ya tiene puntuaciones registradas']);
-        return;
-    }
-
     try {
         $stmt = $pdo->prepare('DELETE FROM competicion WHERE id_competicion = ?');
         $stmt->execute([$id]);
