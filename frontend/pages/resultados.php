@@ -1,12 +1,18 @@
 <?php
+// ============================================================
+// pages/resultados.php — Podio y clasificacion final
+// ============================================================
+// HISTORIAL DE CAMBIOS
+// v1.0 - Página inicial
+// v1.1 - Fix: campo ranking_final renombrado a puesto
+//        en la respuesta de la API
+// ============================================================
 $pageTitle = 'Resultados';
 $current   = 'resultados';
 require_once __DIR__ . '/../includes/auth_check.php';
 $current_user = requireAuth(['admin', 'organizador', 'juez', 'consulta_publica']);
-$usuario = htmlspecialchars($current_user['usuario'], ENT_QUOTES, 'UTF-8');
-$rol     = htmlspecialchars($current_user['rol'],     ENT_QUOTES, 'UTF-8');
-$token   = $current_user['token'];
-
+$rol   = htmlspecialchars($current_user['rol'], ENT_QUOTES, 'UTF-8');
+$token = $current_user['token'];
 include __DIR__ . '/../includes/header.php';
 ?>
 
@@ -36,7 +42,6 @@ include __DIR__ . '/../includes/header.php';
 
 <script>
   if (!sessionStorage.getItem('token')) sessionStorage.setItem('token', <?= json_encode($token) ?>);
-  const esAdmin = <?= json_encode(in_array($current_user['rol'], ['admin', 'organizador'])) ?>;
 
   document.addEventListener('DOMContentLoaded', async () => {
     await cargarCompeticiones();
@@ -46,37 +51,55 @@ include __DIR__ . '/../includes/header.php';
   });
 
   async function cargarCompeticiones() {
-    const res  = await fetch('/api/competiciones.php?limit=100', { headers: { Authorization: 'Bearer ' + sessionStorage.getItem('token') } });
-    const data = await res.json();
-    const sel  = document.getElementById('filtro-competicion');
-    (data.data || []).forEach(c => { sel.innerHTML += `<option value="${c.id_competicion}">${esc(c.nombre_evento)}</option>`; });
+    try {
+      const res  = await fetch('/api/competiciones.php?limit=100', {
+        headers: { Authorization: 'Bearer ' + sessionStorage.getItem('token') }
+      });
+      const data = await res.json();
+      const sel  = document.getElementById('filtro-competicion');
+      (data.data || []).forEach(c => {
+        sel.innerHTML += `<option value="${c.id_competicion}">${esc(c.nombre_evento)}</option>`;
+      });
+    } catch(e) { console.error('Error cargando competiciones', e); }
   }
 
   async function cargarResultados() {
     const compId = document.getElementById('filtro-competicion').value;
     const cont   = document.getElementById('resultados-container');
+
     if (!compId) {
       cont.innerHTML = '<div class="card"><div class="card-body" style="text-align:center;padding:3rem;color:var(--muted-foreground)">Selecciona una competicion</div></div>';
       return;
     }
-    cont.innerHTML = '<div class="card"><div class="card-body" style="text-align:center;padding:3rem;color:var(--muted-foreground)">Cargando...</div></div>';
-    try {
-      const res  = await fetch(`/api/resultados.php?id_competicion=${compId}`, { headers: { Authorization: 'Bearer ' + sessionStorage.getItem('token') } });
-      const data = await res.json();
-      const items = data.data || [];
 
+    cont.innerHTML = '<div class="card"><div class="card-body" style="text-align:center;padding:3rem;color:var(--muted-foreground)">Cargando...</div></div>';
+
+    try {
+      const res  = await fetch(`/api/resultados.php?id_competicion=${compId}`, {
+        headers: { Authorization: 'Bearer ' + sessionStorage.getItem('token') }
+      });
+      const data = await res.json();
+
+      if (!res.ok) {
+        cont.innerHTML = `<div class="card"><div class="card-body" style="text-align:center;padding:3rem;color:var(--muted-foreground)">${esc(data.error || 'No hay resultados calculados')}</div></div>`;
+        return;
+      }
+
+      const items = data.data || [];
       if (!items.length) {
         cont.innerHTML = '<div class="card"><div class="card-body" style="text-align:center;padding:3rem;color:var(--muted-foreground)">No hay resultados calculados para esta competicion</div></div>';
         return;
       }
 
-      // Agrupar por categoría
+      // Agrupar por categoria
       const grupos = {};
       items.forEach(r => {
         const cat = r.categoria || 'Sin categoria';
         if (!grupos[cat]) grupos[cat] = [];
         grupos[cat].push(r);
       });
+
+      const colorPuesto = { 1: 'var(--primary)', 2: 'oklch(0.8 0.01 80)', 3: 'oklch(0.65 0.08 40)' };
 
       cont.innerHTML = Object.entries(grupos).map(([cat, rows]) => `
         <div class="card" style="margin-bottom:1.25rem">
@@ -93,10 +116,9 @@ include __DIR__ . '/../includes/header.php';
                 ${rows.map(r => `
                   <tr>
                     <td>
-                      ${r.ranking_final <= 3
-                        ? `<span style="font-family:'Bebas Neue';font-size:1.5rem;color:${['','var(--gold)','oklch(0.8 0.01 80)','oklch(0.65 0.08 40)'][r.ranking_final]}">#${r.ranking_final}</span>`
-                        : `<span style="font-family:'Bebas Neue';font-size:1.25rem;color:var(--muted-foreground)">#${r.ranking_final}</span>`
-                      }
+                      <span style="font-family:'Bebas Neue';font-size:${r.puesto <= 3 ? '1.5' : '1.25'}rem;color:${colorPuesto[r.puesto] ?? 'var(--muted-foreground)'}">
+                        #${r.puesto}
+                      </span>
                     </td>
                     <td style="font-weight:500">${esc(r.atleta)}</td>
                     <td style="color:var(--muted-foreground)">${esc(r.nacionalidad ?? '—')}</td>
@@ -107,6 +129,7 @@ include __DIR__ . '/../includes/header.php';
             </table>
           </div>
         </div>`).join('');
+
     } catch(e) {
       cont.innerHTML = `<div class="card"><div class="card-body" style="color:var(--destructive);text-align:center;padding:2rem">${e.message}</div></div>`;
     }
@@ -117,7 +140,11 @@ include __DIR__ . '/../includes/header.php';
     if (!compId) { alert('Selecciona una competicion primero'); return; }
     if (!confirm('Calcular resultados para esta competicion?')) return;
     try {
-      const res  = await fetch('/api/resultados.php', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + sessionStorage.getItem('token') }, body: JSON.stringify({ id_competicion: parseInt(compId) }) });
+      const res  = await fetch('/api/resultados.php', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + sessionStorage.getItem('token') },
+        body: JSON.stringify({ id_competicion: parseInt(compId) })
+      });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || 'Error al calcular');
       cargarResultados();
