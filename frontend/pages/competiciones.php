@@ -276,4 +276,21 @@ include __DIR__ . '/../includes/header.php';
   }
 </script>
 
+<!-- Modal confirmacion eliminar -->
+<div id="confirm-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);backdrop-filter:blur(4px);z-index:2000;align-items:center;justify-content:center;padding:1rem">
+  <div style="background:var(--card);border:1px solid var(--border);border-radius:.75rem;width:100%;max-width:440px;padding:1.5rem">
+    <h2 style="font-size:1.25rem;margin-bottom:.75rem">Confirmar eliminacion</h2>
+    <p style="color:var(--muted-foreground);font-size:.9rem;margin-bottom:1rem">
+      Escribe el nombre del evento para confirmar:<br>
+      <strong id="confirm-nombre-display" style="color:var(--foreground)"></strong>
+    </p>
+    <input class="input" id="confirm-input" placeholder="Escribe el nombre exacto..." style="margin-bottom:.75rem">
+    <div id="confirm-error" style="display:none;color:var(--destructive);font-size:.85rem;margin-bottom:.75rem"></div>
+    <div style="display:flex;justify-content:flex-end;gap:.75rem">
+      <button class="btn btn-outline" id="confirm-cancelar">Cancelar</button>
+      <button class="btn btn-primary" id="confirm-eliminar" style="background:var(--destructive);border-color:var(--destructive)">Eliminar</button>
+    </div>
+  </div>
+</div>
+
 <?php include __DIR__ . '/../includes/footer.php'; ?>
