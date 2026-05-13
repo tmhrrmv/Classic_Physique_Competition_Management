@@ -168,7 +168,7 @@ include __DIR__ . '/../includes/header.php';
     document.getElementById('modal-titulo').textContent  = comp ? 'Editar Competicion' : 'Nueva Competicion';
     document.getElementById('edit-id').value             = comp?.id_competicion ?? '';
     document.getElementById('campo-nombre').value        = comp?.nombre_evento  ?? '';
-    document.getElementById('campo-fecha').value         = comp?.fecha ? comp.fecha.split('T')[0].split(' ')[0] : '';
+    document.getElementById('campo-fecha').value         = comp?.fecha          ?? '';
     document.getElementById('campo-lugar').value         = comp?.lugar          ?? '';
     document.getElementById('btn-text').textContent      = comp ? 'Actualizar' : 'Crear';
     document.getElementById('modal-error').style.display = 'none';
@@ -228,68 +228,46 @@ include __DIR__ . '/../includes/header.php';
     }
   }
 
-  async function eliminarComp(id, nombre) {
-    const confirmado = await confirmarEliminacion(nombre);
-    if (!confirmado) return;
-    try {
-      const res  = await fetch(`/api/competiciones.php?id=${id}`, {
-        method: 'DELETE',
-        headers: { Authorization: 'Bearer ' + sessionStorage.getItem('token') }
-      });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error || 'Error al eliminar');
-      cargarCompeticiones();
-    } catch(e) { alert(e.message); }
+  // Modal confirmacion eliminar con campo de texto
+  let pendienteEliminarId   = null;
+  let pendienteEliminarNombre = null;
+
+  function eliminarComp(id, nombre) {
+    pendienteEliminarId     = id;
+    pendienteEliminarNombre = nombre;
+    document.getElementById('confirm-nombre-display').textContent = nombre;
+    document.getElementById('confirm-input').value = '';
+    document.getElementById('confirm-error').style.display = 'none';
+    document.getElementById('confirm-overlay').style.display = 'flex';
   }
 
-  function confirmarEliminacion(nombre) {
-    return new Promise(resolve => {
-      // Create inline confirmation dialog
-      const overlay = document.createElement('div');
-      overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.7);backdrop-filter:blur(4px);z-index:2000;display:flex;align-items:center;justify-content:center;padding:1rem';
-      overlay.innerHTML = `
-        <div style="background:var(--card);border:1px solid var(--border);border-radius:.75rem;width:100%;max-width:440px;padding:1.5rem">
-          <h3 style="font-size:1.1rem;margin-bottom:.5rem;color:var(--destructive)">⚠️ Eliminar competición</h3>
-          <p style="font-size:.9rem;color:var(--muted-foreground);margin-bottom:1rem">
-            Esta acción es <strong>irreversible</strong>. Se eliminarán también todas las inscripciones y puntuaciones asociadas.<br><br>
-            Escribe <strong>${esc(nombre)}</strong> para confirmar:
-          </p>
-          <input id="confirm-nombre-input" class="input" placeholder="Nombre de la competición" style="width:100%;margin-bottom:1rem">
-          <div id="confirm-error" style="display:none;color:var(--destructive);font-size:.8rem;margin-bottom:.75rem">El nombre no coincide.</div>
-          <div style="display:flex;justify-content:flex-end;gap:.75rem">
-            <button id="confirm-cancel" class="btn btn-outline">Cancelar</button>
-            <button id="confirm-ok" class="btn btn-danger" disabled>Eliminar</button>
-          </div>
-        </div>`;
-      document.body.appendChild(overlay);
-
-      const input    = overlay.querySelector('#confirm-nombre-input');
-      const btnOk    = overlay.querySelector('#confirm-ok');
-      const btnCancel= overlay.querySelector('#confirm-cancel');
-      const errEl    = overlay.querySelector('#confirm-error');
-
-      input.focus();
-      input.addEventListener('input', () => {
-        btnOk.disabled = input.value.trim() !== nombre;
-        errEl.style.display = 'none';
-      });
-
-      function cleanup(result) {
-        document.body.removeChild(overlay);
-        resolve(result);
+  document.addEventListener('DOMContentLoaded', () => {
+    document.getElementById('confirm-cancelar').onclick = () => {
+      document.getElementById('confirm-overlay').style.display = 'none';
+    };
+    document.getElementById('confirm-eliminar').onclick = async () => {
+      const inputVal = document.getElementById('confirm-input').value.trim();
+      const errEl    = document.getElementById('confirm-error');
+      if (inputVal !== pendienteEliminarNombre) {
+        errEl.textContent   = 'El nombre no coincide';
+        errEl.style.display = 'block';
+        return;
       }
-
-      btnOk.addEventListener('click', () => {
-        if (input.value.trim() !== nombre) {
-          errEl.style.display = 'block';
-          return;
-        }
-        cleanup(true);
-      });
-      btnCancel.addEventListener('click', () => cleanup(false));
-      overlay.addEventListener('click', (e) => { if (e.target === overlay) cleanup(false); });
-    });
-  }
+      try {
+        const res  = await fetch(`/api/competiciones.php?id=${pendienteEliminarId}`, {
+          method: 'DELETE',
+          headers: { Authorization: 'Bearer ' + sessionStorage.getItem('token') }
+        });
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.error || 'Error al eliminar');
+        document.getElementById('confirm-overlay').style.display = 'none';
+        cargarCompeticiones();
+      } catch(e) {
+        errEl.textContent   = e.message;
+        errEl.style.display = 'block';
+      }
+    };
+  });
 
   function esc(str) {
     const d = document.createElement('div');
