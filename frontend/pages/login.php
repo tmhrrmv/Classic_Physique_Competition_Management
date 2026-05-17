@@ -97,6 +97,14 @@ switch ($reason) {
     <span id="btn-text">Entrar</span>
     <span id="btn-spinner" style="display:none">Cargando...</span>
   </button>
+
+  <div style="margin-top:1rem;text-align:center">
+    <span style="font-size:.8rem;color:var(--muted-foreground)">¿Solo quieres ver resultados?</span>
+    <br>
+    <button id="btn-publico" style="background:none;border:none;color:var(--primary);font-size:.85rem;cursor:pointer;margin-top:.35rem;text-decoration:underline">
+      Continuar sin cuenta
+    </button>
+  </div>
 </div>
 
 <script>
@@ -119,6 +127,13 @@ switch ($reason) {
     });
 
     btnLogin.addEventListener('click', doLogin);
+
+    // Continuar sin cuenta — login automático como publico
+    document.getElementById('btn-publico').addEventListener('click', () => {
+      document.getElementById('username').value = 'publico';
+      document.getElementById('password').value = 'Publico2025!';
+      doLogin();
+    });
 
     async function doLogin() {
       const username = document.getElementById('username').value.trim();
@@ -150,15 +165,15 @@ switch ($reason) {
         // Guardar token en sessionStorage
         sessionStorage.setItem('token', json.token);
 
-        // Guardar sesión PHP
-        const sesRes = await fetch('/includes/set_session.php', {
+        // Guardar sesión PHP via API
+        const sesRes = await fetch('/api/auth.php?action=session', {
           method:  'POST',
           headers: { 'Content-Type': 'application/json' },
           body:    JSON.stringify({
-            token:    json.token,
-            usuario:  json.username,
-            rol:      json.role,
-            id_juez:  json.id_juez ?? null
+            token:   json.token,
+            usuario: json.username,
+            rol:     json.role,
+            id_juez: json.id_juez ?? null
           })
         });
         const sesJson = await sesRes.json();
