@@ -14,7 +14,8 @@ require_once __DIR__ . '/../includes/auth_check.php';
 startSecureSession();
 
 // Si ya hay sesión activa redirigir al dashboard
-if (isAuthenticated()) {
+// Comprobación directa para evitar bucle de redirecciones
+if (!empty($_SESSION['usuario']) && !empty($_SESSION['rol'])) {
     header('Location: /pages/dashboard.php');
     exit;
 }
