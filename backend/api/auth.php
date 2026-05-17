@@ -17,6 +17,9 @@ declare(strict_types=1);
 //        nunca del body. Comprobación activo en BD.
 // v1.8 - Fix: verifyJwt devuelve ['payload'=>...] no el payload
 //        directo. Corregido acceso a sub/role/id_juez.
+// v1.9 - Fix: ?action=session ahora usa DbSessionHandler (MySQL)
+//        igual que auth_check.php. Con session_start() nativo
+//        la sesión se guardaba en archivos pero se leía de MySQL.
 // ============================================================
 
 require_once __DIR__ . '/../config.php';
@@ -67,19 +70,38 @@ if (isset($_GET['action']) && $_GET['action'] === 'session') {
         exit;
     }
 
-    // Sesión segura con cookies protegidas
+    // Sesión con MySQL handler — mismo store que auth_check.php
+    // (necesario para multi-worker FrankenPHP en Railway)
     if (session_status() === PHP_SESSION_NONE) {
-        ini_set('session.cookie_httponly', '1');
+        require_once __DIR__ . '/../clases/DbSessionHandler.php';
+        $sessionHandler = new DbSessionHandler(ConexionDB::getInstancia()->getConexion());
+        session_set_save_handler($sessionHandler, true);
+
+        $isHttps = (!empty($_SERVER['HTTP_X_FORWARDED_PROTO']) && $_SERVER['HTTP_X_FORWARDED_PROTO'] === 'https')
+            || (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on');
+
         ini_set('session.use_only_cookies', '1');
-        ini_set('session.cookie_samesite', 'Lax');
+        ini_set('session.use_strict_mode',  '1');
+        ini_set('session.gc_maxlifetime',   '7200');
+        session_set_cookie_params([
+            'lifetime' => 0,
+            'path'     => '/',
+            'domain'   => '',
+            'secure'   => $isHttps,
+            'httponly' => true,
+            'samesite' => 'Lax',
+        ]);
         session_start();
     }
     session_regenerate_id(true);
 
-    $_SESSION['usuario'] = $payload['sub'];
-    $_SESSION['rol']     = $payload['role'];
-    $_SESSION['token']   = $data['token'];
-    $_SESSION['id_juez'] = $payload['id_juez'] ?? null;
+    $_SESSION['usuario']           = $payload['sub'];
+    $_SESSION['rol']               = $payload['role'];
+    $_SESSION['token']             = $data['token'];
+    $_SESSION['id_juez']           = $payload['id_juez'] ?? null;
+    $_SESSION['fingerprint']       = hash('sha256', $_SERVER['HTTP_USER_AGENT'] ?? 'unknown');
+    $_SESSION['last_activity']     = time();
+    $_SESSION['last_regeneration'] = time();
 
     jsonResponse(['ok' => true]);
     exit;
