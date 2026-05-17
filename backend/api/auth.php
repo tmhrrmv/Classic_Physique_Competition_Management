@@ -15,6 +15,8 @@ declare(strict_types=1);
 // v1.7 - Añadido ?action=session para guardar sesión PHP
 //        tras recibir JWT. Datos del token verificado,
 //        nunca del body. Comprobación activo en BD.
+// v1.8 - Fix: verifyJwt devuelve ['payload'=>...] no el payload
+//        directo. Corregido acceso a sub/role/id_juez.
 // ============================================================
 
 require_once __DIR__ . '/../config.php';
@@ -43,7 +45,12 @@ if (isset($_GET['action']) && $_GET['action'] === 'session') {
 
     // Verificar JWT — rol y usuario se extraen del token
     $decoded = verifyJwt($data['token']);
-    if (!$decoded || empty($decoded['sub']) || empty($decoded['role'])) {
+    if (isset($decoded['error'])) {
+        jsonResponse(['error' => $decoded['error']], 401);
+        exit;
+    }
+    $payload = $decoded['payload'];
+    if (empty($payload['sub']) || empty($payload['role'])) {
         jsonResponse(['error' => 'Token inválido o expirado'], 401);
         exit;
     }
@@ -54,7 +61,7 @@ if (isset($_GET['action']) && $_GET['action'] === 'session') {
         'SELECT id_usuario FROM usuarios
           WHERE username = ? AND activo = 1 LIMIT 1'
     );
-    $stmt->execute([$decoded['sub']]);
+    $stmt->execute([$payload['sub']]);
     if (!$stmt->fetch()) {
         jsonResponse(['error' => 'Usuario no encontrado o desactivado'], 403);
         exit;
@@ -69,10 +76,10 @@ if (isset($_GET['action']) && $_GET['action'] === 'session') {
     }
     session_regenerate_id(true);
 
-    $_SESSION['usuario'] = $decoded['sub'];
-    $_SESSION['rol']     = $decoded['role'];
+    $_SESSION['usuario'] = $payload['sub'];
+    $_SESSION['rol']     = $payload['role'];
     $_SESSION['token']   = $data['token'];
-    $_SESSION['id_juez'] = $decoded['id_juez'] ?? null;
+    $_SESSION['id_juez'] = $payload['id_juez'] ?? null;
 
     jsonResponse(['ok' => true]);
     exit;
