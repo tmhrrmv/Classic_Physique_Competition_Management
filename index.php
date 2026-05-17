@@ -5,12 +5,11 @@
 // HISTORIAL DE CAMBIOS
 // v1.0 - Router básico: /api/ -> backend, resto -> frontend
 // v1.1 - Añadido soporte para archivos estáticos
-//        CSS, JS, imágenes y fuentes se sirven con
-//        Content-Type correcto en lugar de text/html
 // v1.2 - ob_start() para capturar output antes de headers
-//        Evita "headers already sent" por warnings de PHP
+// v1.3 - Fix: $_SERVER['SCRIPT_FILENAME'] y $_SERVER['PHP_SELF']
+//        actualizados antes del require para que FrankenPHP
+//        ejecute correctamente los archivos PHP incluidos
 // ============================================================
-
 ob_start();
 
 $uri = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
@@ -21,10 +20,17 @@ $uri = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
 if (strpos($uri, '/api/') === 0) {
     $file = __DIR__ . '/backend' . $uri;
     if (file_exists($file)) {
+        ob_end_clean();
+        // Actualizar variables de servidor para que FrankenPHP
+        // ejecute el archivo como si fuera la entrada principal
+        $_SERVER['SCRIPT_FILENAME'] = $file;
+        $_SERVER['SCRIPT_NAME']     = $uri;
+        $_SERVER['PHP_SELF']        = $uri;
         require $file;
     } else {
         ob_end_clean();
         http_response_code(404);
+        header('Content-Type: application/json');
         echo json_encode(['error' => 'Endpoint no encontrado']);
     }
     exit;
@@ -52,6 +58,7 @@ if (isset($staticTypes[$ext])) {
     if (file_exists($file)) {
         ob_end_clean();
         header('Content-Type: ' . $staticTypes[$ext]);
+        header('Cache-Control: public, max-age=86400');
         readfile($file);
         exit;
     }
@@ -64,9 +71,16 @@ if (isset($staticTypes[$ext])) {
 // Todo lo demás -> frontend PHP
 // -------------------------------------------------------
 ob_end_clean();
+
 $file = __DIR__ . '/frontend' . ($uri === '/' ? '/index.php' : $uri);
+
 if (file_exists($file)) {
+    $_SERVER['SCRIPT_FILENAME'] = $file;
+    $_SERVER['SCRIPT_NAME']     = $uri;
+    $_SERVER['PHP_SELF']        = $uri;
     require $file;
 } else {
-    require __DIR__ . '/frontend/index.php';
+    $fallback = __DIR__ . '/frontend/index.php';
+    $_SERVER['SCRIPT_FILENAME'] = $fallback;
+    require $fallback;
 }
