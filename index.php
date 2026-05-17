@@ -37,6 +37,26 @@ if (strpos($uri, '/api/') === 0) {
 }
 
 // -------------------------------------------------------
+// Includes del frontend (set_session, etc.)
+// -------------------------------------------------------
+if (strpos($uri, '/includes/') === 0) {
+    $file = __DIR__ . '/frontend' . $uri;
+    if (file_exists($file)) {
+        ob_end_clean();
+        $_SERVER['SCRIPT_FILENAME'] = $file;
+        $_SERVER['SCRIPT_NAME']     = $uri;
+        $_SERVER['PHP_SELF']        = $uri;
+        require $file;
+    } else {
+        ob_end_clean();
+        http_response_code(404);
+        header('Content-Type: application/json');
+        echo json_encode(['error' => 'Endpoint no encontrado']);
+    }
+    exit;
+}
+
+// -------------------------------------------------------
 // Archivos estáticos — servir con Content-Type correcto
 // -------------------------------------------------------
 $ext = strtolower(pathinfo($uri, PATHINFO_EXTENSION));
